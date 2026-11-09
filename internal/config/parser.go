@@ -67,6 +67,8 @@ func (a *ViewType) UnmarshalJSON(b []byte) error {
 		*a = IssuesView
 	case "repo":
 		*a = RepoView
+	case "board":
+		*a = BoardView
 	}
 
 	return nil
@@ -77,7 +79,39 @@ const (
 	PRsView           ViewType = "prs"
 	IssuesView        ViewType = "issues"
 	RepoView          ViewType = "repo"
+	BoardView         ViewType = "board"
 )
+
+// ScrumBoardConfig points gh-dash at a GitHub Project (v2) rendered as a
+// kanban board. Tabs are read from the project's own views.
+type ScrumBoardConfig struct {
+	Owner  string `yaml:"owner"`
+	Number int    `yaml:"number"`
+	Title  string `yaml:"title,omitempty"`
+	// StatusField is the single-select field used for columns (default "Status").
+	StatusField string `yaml:"statusField,omitempty"`
+	// CollapseOldDone groups "Done in N" columns other than the latest N
+	// into one collapsed column (default true).
+	CollapseOldDone *bool `yaml:"collapseOldDone,omitempty"`
+}
+
+func (c *ScrumBoardConfig) GetStatusField() string {
+	if c == nil || c.StatusField == "" {
+		return "Status"
+	}
+	return c.StatusField
+}
+
+func (c *ScrumBoardConfig) GetTitle() string {
+	if c == nil || c.Title == "" {
+		return "Scrum Board"
+	}
+	return c.Title
+}
+
+func (c *ScrumBoardConfig) ShouldCollapseOldDone() bool {
+	return c == nil || c.CollapseOldDone == nil || *c.CollapseOldDone
+}
 
 type SectionConfig struct {
 	Title   string
@@ -331,6 +365,13 @@ type Config struct {
 	ShowAuthorIcons          bool                         `yaml:"showAuthorIcons,omitempty"`
 	SmartFilteringAtLaunch   bool                         `yaml:"smartFilteringAtLaunch"                         default:"true"`
 	IncludeReadNotifications bool                         `yaml:"includeReadNotifications"                       default:"true"`
+	ScrumBoard               *ScrumBoardConfig            `yaml:"scrumBoard,omitempty"`
+	HideNotifications        bool                         `yaml:"hideNotifications,omitempty"`
+}
+
+func (cfg *Config) HasScrumBoard() bool {
+	return cfg != nil && cfg.ScrumBoard != nil && cfg.ScrumBoard.Owner != "" &&
+		cfg.ScrumBoard.Number > 0
 }
 
 type configError struct {
@@ -873,6 +914,12 @@ func (parser ConfigParser) unmarshalConfigWithDefaults() (Config, error) {
 
 	repoFF := IsFeatureEnabled(FF_REPO_VIEW)
 	if cfg.Defaults.View == RepoView && !repoFF {
+		cfg.Defaults.View = PRsView
+	}
+	if cfg.Defaults.View == BoardView && !cfg.HasScrumBoard() {
+		cfg.Defaults.View = IssuesView
+	}
+	if cfg.Defaults.View == NotificationsView && cfg.HideNotifications {
 		cfg.Defaults.View = PRsView
 	}
 

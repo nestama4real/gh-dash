@@ -512,10 +512,12 @@ func (m *BaseModel) GetPromptConfirmation() string {
 		case m.PromptConfirmationAction == "approveWorkflows" && m.Ctx.View == config.PRsView:
 			prompt = "Are you sure you want to approve all workflows? (y/N) "
 
-		case m.PromptConfirmationAction == "close" && m.Ctx.View == config.IssuesView:
+		case m.PromptConfirmationAction == "close" &&
+			(m.Ctx.View == config.IssuesView || m.Ctx.View == config.BoardView):
 			prompt = "Are you sure you want to close this issue? (y/N) "
 
-		case m.PromptConfirmationAction == "reopen" && m.Ctx.View == config.IssuesView:
+		case m.PromptConfirmationAction == "reopen" &&
+			(m.Ctx.View == config.IssuesView || m.Ctx.View == config.BoardView):
 			prompt = "Are you sure you want to reopen this issue? (y/N) "
 		case m.PromptConfirmationAction == "delete" && m.Ctx.View == config.RepoView:
 			prompt = "Are you sure you want to delete this branch? (y/N) "

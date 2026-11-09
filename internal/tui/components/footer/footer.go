@@ -135,6 +135,9 @@ func (m *Model) renderViewButton(view config.ViewType) string {
 	case config.IssuesView:
 		icon = ""
 		label = " Issues"
+	case config.BoardView:
+		icon = "\U000f0821"
+		label = " " + m.ctx.Config.ScrumBoard.GetTitle()
 	}
 
 	if isActive {
@@ -176,14 +179,28 @@ func (m *Model) renderViewSwitcher(ctx *context.ProgramContext) string {
 		user = ctx.Styles.Common.FooterStyle.Render("@" + ctx.User)
 	}
 
-	view := lipgloss.JoinHorizontal(
-		lipgloss.Top,
-		ctx.Styles.ViewSwitcher.ViewsSeparator.PaddingLeft(1).
-			Render(m.renderViewButton(config.NotificationsView)),
-		ctx.Styles.ViewSwitcher.ViewsSeparator.Render(viewSeparator),
+	var buttons []string
+	if ctx.Config == nil || !ctx.Config.HideNotifications {
+		buttons = append(buttons,
+			ctx.Styles.ViewSwitcher.ViewsSeparator.PaddingLeft(1).
+				Render(m.renderViewButton(config.NotificationsView)),
+			ctx.Styles.ViewSwitcher.ViewsSeparator.Render(viewSeparator))
+	} else {
+		buttons = append(buttons, ctx.Styles.ViewSwitcher.ViewsSeparator.Render(" "))
+	}
+	buttons = append(buttons,
 		m.renderViewButton(config.PRsView),
 		ctx.Styles.ViewSwitcher.ViewsSeparator.Render(viewSeparator),
-		m.renderViewButton(config.IssuesView),
+		m.renderViewButton(config.IssuesView))
+	if ctx.Config != nil && ctx.Config.HasScrumBoard() {
+		buttons = append(buttons,
+			ctx.Styles.ViewSwitcher.ViewsSeparator.Render(viewSeparator),
+			m.renderViewButton(config.BoardView))
+	}
+
+	view := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		strings.Join(buttons, ""),
 		lipgloss.NewStyle().Background(ctx.Styles.Common.FooterStyle.GetBackground()).Foreground(
 			ctx.Styles.ViewSwitcher.ViewsSeparator.GetBackground()).Render(" "),
 		repo,

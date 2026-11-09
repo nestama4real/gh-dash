@@ -27,6 +27,7 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/git"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/boardsection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/branch"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/branchsidebar"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/footer"
@@ -63,12 +64,17 @@ type Model struct {
 	prs              []section.Section
 	issues           []section.Section
 	notifications    []section.Section
+	board            []section.Section
+	boardStore       *boardsection.Store
 	tabs             tabs.Model
 	ctx              *context.ProgramContext
 	taskSpinner      spinner.Model
 	tasks            map[string]context.Task
 	positionOverride string // "" means no override, "right" or "bottom"
-	mode             Mode
+	// previewBeforeBoard remembers whether the preview was open before
+	// entering the board view, which starts with the preview closed.
+	previewBeforeBoard bool
+	mode               Mode
 }
 
 type Mode int
@@ -90,6 +96,7 @@ func NewModel(location config.Location, repos Repositories) Model {
 		sidebar:     sidebar.NewModel(),
 		taskSpinner: taskSpinner,
 		tasks:       map[string]context.Task{},
+		boardStore:  boardsection.NewStore(),
 	}
 
 	version := "dev"
@@ -204,6 +211,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		log.Info("Key pressed", "key", msg.String())
 		m.ctx.Error = nil
+
+		if bs, ok := currSection.(*boardsection.Model); ok && bs.IsCapturingInput() {
+			cmd = m.updateSection(currSection.GetId(), currSection.GetType(), msg)
+			return m, cmd
+		}
 
 		if currSection != nil && (currSection.IsSearchFocused() ||
 			currSection.IsPromptConfirmationFocused()) {
@@ -494,6 +506,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.syncSidebar()
 				return m, nil
 			}
+		case m.ctx.View == config.BoardView:
+			if boardCmd, handled := m.handleBoardKey(msg, currSection, currRowData); handled {
+				return m, boardCmd
+			}
+
 		case m.ctx.View == config.IssuesView:
 			switch {
 			case key.Matches(msg, m.keys.OpenGithub):
@@ -707,6 +724,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ctx.View = m.ctx.Config.Defaults.View
 		m.currSectionId = 0
 		m.sidebar.IsOpen = msg.Config.Defaults.Preview.Open
+		if m.ctx.View == config.BoardView {
+			m.previewBeforeBoard = m.sidebar.IsOpen
+			m.sidebar.IsOpen = false
+		}
 		m.syncMainContentDimensions()
 
 		m.initSections()
@@ -734,6 +755,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateTabs()
 		cmds = append(cmds, fetchSectionsCmds, m.doRefreshAtInterval())
 
+	case boardsection.BoardFetchedMsg:
+		cmds = append(cmds, m.onBoardFetched(msg))
+
 	case userFetchedMsg:
 		m.ctx.User = msg.user
 
@@ -756,7 +780,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 			cmds = append(cmds, clear)
 
-			scmd := m.updateSection(msg.SectionId, msg.SectionType, msg.Msg)
+			var scmd tea.Cmd
+			if fetched, ok := msg.Msg.(boardsection.BoardFetchedMsg); ok {
+				scmd = m.onBoardFetched(fetched)
+			} else {
+				scmd = m.updateSection(msg.SectionId, msg.SectionType, msg.Msg)
+			}
 			cmds = append(cmds, scmd)
 
 			syncCmd := m.syncSidebar()
@@ -1140,6 +1169,11 @@ func (m *Model) updateSection(id int, sType string, msg tea.Msg) (cmd tea.Cmd) {
 	case issuessection.SectionType:
 		updatedSection, cmd = m.issues[id].Update(msg)
 		m.issues[id] = updatedSection
+	case boardsection.SectionType:
+		if id < len(m.board) {
+			updatedSection, cmd = m.board[id].Update(msg)
+			m.board[id] = updatedSection
+		}
 	}
 
 	currSection := m.getCurrSection()
@@ -1305,6 +1339,11 @@ func (m *Model) syncSidebar() tea.Cmd {
 		}
 	case *data.IssueData:
 		m.issueSidebar.SetSectionId(m.currSectionId)
+		if m.ctx.View == config.BoardView {
+			m.issueSidebar.SetSectionType(boardsection.SectionType)
+		} else {
+			m.issueSidebar.SetSectionType(issuessection.SectionType)
+		}
 		m.issueSidebar.SetRow(row)
 		m.issueSidebar.SetWidth(width)
 		m.sidebar.SetContent(m.issueSidebar.View())
@@ -1545,6 +1584,9 @@ func (m *Model) fetchAllViewSections() tea.Cmd {
 		prcmds := prssection.FetchAllSections(m.ctx, m.prs)
 		cmds = append(cmds, prcmds)
 		return tea.Batch(cmds...)
+	case config.BoardView:
+		cmds = append(cmds, boardsection.Fetch(m.ctx, m.boardStore, m.currSectionId))
+		return tea.Batch(cmds...)
 	default:
 		issuecmds := issuessection.FetchAllSections(m.ctx, m.issues)
 		cmds = append(cmds, issuecmds)
@@ -1566,6 +1608,8 @@ func (m *Model) getCurrentViewSections() []section.Section {
 		return m.notifications
 	case config.PRsView:
 		return m.prs
+	case config.BoardView:
+		return m.board
 	default:
 		return m.issues
 	}
@@ -1577,35 +1621,19 @@ func (m *Model) updateTabs() {
 }
 
 func (m *Model) switchSelectedView() tea.Cmd {
-	repoFF := config.IsFeatureEnabled(config.FF_REPO_VIEW)
-
 	// Reset notification subject when leaving notifications view
 	if m.ctx.View == config.NotificationsView {
 		keys.SetNotificationSubject(keys.NotificationSubjectNone)
 		m.notificationView.ClearSubject()
 	}
 
-	// View cycle: Notifications → PRs → Issues (→ Repo if enabled) → Notifications
-	if repoFF {
-		switch m.ctx.View {
-		case config.NotificationsView:
-			m.ctx.View = config.PRsView
-		case config.PRsView:
-			m.ctx.View = config.IssuesView
-		case config.IssuesView:
-			m.ctx.View = config.RepoView
-		case config.RepoView:
-			m.ctx.View = config.NotificationsView
-		}
-	} else {
-		switch m.ctx.View {
-		case config.NotificationsView:
-			m.ctx.View = config.PRsView
-		case config.PRsView:
-			m.ctx.View = config.IssuesView
-		default:
-			m.ctx.View = config.NotificationsView
-		}
+	prevView := m.ctx.View
+	m.ctx.View = m.nextView()
+	if m.ctx.View == config.BoardView {
+		m.previewBeforeBoard = m.sidebar.IsOpen
+		m.sidebar.IsOpen = false
+	} else if prevView == config.BoardView {
+		m.sidebar.IsOpen = m.previewBeforeBoard
 	}
 
 	m.syncMainContentDimensions()
@@ -1631,7 +1659,7 @@ func (m *Model) isUserDefinedKeybinding(msg tea.KeyMsg) bool {
 		}
 	}
 
-	if m.ctx.View == config.IssuesView {
+	if m.ctx.View == config.IssuesView || m.ctx.View == config.BoardView {
 		for _, keybinding := range m.ctx.Config.Keybindings.Issues {
 			if keybinding.Builtin == "" && keybinding.Key == msg.String() {
 				return true
@@ -1934,6 +1962,10 @@ func (m *Model) initSections() {
 	m.prs = prssection.InitSections(m.ctx)
 	m.issues = issuessection.InitSections(m.ctx)
 	m.notifications = notificationssection.InitSections(m.ctx)
+	if m.ctx.Config.HasScrumBoard() {
+		m.boardStore.LoadCache(m.ctx.Config)
+		m.board = boardsection.InitSections(m.ctx, m.boardStore)
+	}
 }
 
 func (m *Model) isViewSectionsStale() bool {

@@ -34,8 +34,11 @@ type Model struct {
 	ctx       *context.ProgramContext
 	issue     *issuerow.Issue
 	sectionId int
-	width     int
-	editor    cmpcontroller.Controller
+	// sectionType routes task results back to the section showing the issue.
+	// Defaults to the issues section.
+	sectionType string
+	width       int
+	editor      cmpcontroller.Controller
 }
 
 func NewModel(ctx *context.ProgramContext) Model {
@@ -60,7 +63,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd, *IssueAction) {
 			return m, nil, nil
 		}
 
-		sid := tasks.SectionIdentifier{Id: m.sectionId, Type: issuessection.SectionType}
+		sid := tasks.SectionIdentifier{Id: m.sectionId, Type: m.getSectionType()}
 
 		switch mode {
 		case cmpcontroller.ModeComment:
@@ -263,6 +266,17 @@ func (m *Model) SetWidth(width int) {
 
 func (m *Model) SetSectionId(id int) {
 	m.sectionId = id
+}
+
+func (m *Model) SetSectionType(sectionType string) {
+	m.sectionType = sectionType
+}
+
+func (m *Model) getSectionType() string {
+	if m.sectionType == "" {
+		return issuessection.SectionType
+	}
+	return m.sectionType
 }
 
 func (m *Model) SetRow(data *data.IssueData) {

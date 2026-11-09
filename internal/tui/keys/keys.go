@@ -74,6 +74,9 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	case config.PRsView:
 		additionalKeys = PRFullHelp()
 		customKeys = append(customKeys, CustomPRBindings...)
+	case config.BoardView:
+		additionalKeys = BoardFullHelp()
+		customKeys = append(customKeys, CustomIssueBindings...)
 	case config.RepoView:
 		additionalKeys = BranchFullHelp()
 		customKeys = append(customKeys, CustomBranchBindings...)
