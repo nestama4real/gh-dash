@@ -42,6 +42,9 @@ type fieldEditor struct {
 	optCur  int
 	input   textinput.Model
 	err     string
+	// direct is set when the editor was opened on one field (t / T):
+	// esc then closes it instead of going back to the field list.
+	direct bool
 }
 
 // OpenEditor opens the field editor on the selected card.
@@ -68,6 +71,29 @@ func (m *Model) OpenEditor() tea.Cmd {
 	m.editor = &fieldEditor{itemId: item.Id, label: label, fields: fields}
 	return nil
 }
+
+// OpenFieldEditor opens the editor straight on the first field matching
+// match, e.g. the estimate. It does nothing when no field matches.
+func (m *Model) OpenFieldEditor(match func(fieldName string) bool) tea.Cmd {
+	m.OpenEditor()
+	e := m.editor
+	if e == nil {
+		return nil
+	}
+	for i, f := range e.fields {
+		if match(f.Name) {
+			e.cursor = i
+			e.direct = true
+			return e.openField(m, m.findItem(e.itemId))
+		}
+	}
+	m.editor = nil
+	return nil
+}
+
+func IsEstimateField(name string) bool { return isEstimateField(name) }
+
+func IsActualTimeField(name string) bool { return isActualField(name) }
 
 func (e *fieldEditor) openField(m *Model, item *data.ProjectItem) tea.Cmd {
 	f := e.fields[e.cursor]
@@ -145,6 +171,10 @@ func (m *Model) updateEditor(msg tea.KeyPressMsg) tea.Cmd {
 	case stageOptions:
 		switch key {
 		case "esc", "h", "left":
+			if e.direct {
+				m.editor = nil
+				return nil
+			}
 			e.stage = stageFields
 		case "ctrl+c", "q":
 			m.editor = nil
@@ -171,6 +201,10 @@ func (m *Model) updateEditor(msg tea.KeyPressMsg) tea.Cmd {
 	case stageInput:
 		switch key {
 		case "esc":
+			if e.direct {
+				m.editor = nil
+				return nil
+			}
 			e.stage = stageFields
 			e.input.Blur()
 			return nil
@@ -300,6 +334,9 @@ func (m *Model) renderEditor() string {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(theme.ErrorText).Render(e.err))
 		}
 		hint = "enter apply • esc back"
+		if e.direct {
+			hint = "enter apply • esc cancel"
+		}
 	}
 	lines = append(lines, "", faint.Render(hint))
 

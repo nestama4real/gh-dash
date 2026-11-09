@@ -13,6 +13,8 @@ type BoardKeyMap struct {
 	MoveLeft      key.Binding
 	MoveRight     key.Binding
 	EditFields    key.Binding
+	EditEstimate  key.Binding
+	EditActual    key.Binding
 	ToggleOldDone key.Binding
 	Preview       key.Binding
 	ClosePreview  key.Binding
@@ -39,6 +41,14 @@ var BoardKeys = BoardKeyMap{
 		key.WithKeys("e"),
 		key.WithHelp("e", "edit fields"),
 	),
+	EditEstimate: key.NewBinding(
+		key.WithKeys("t"),
+		key.WithHelp("t", "set estimated time"),
+	),
+	EditActual: key.NewBinding(
+		key.WithKeys("T"),
+		key.WithHelp("T", "set actual time"),
+	),
 	ToggleOldDone: key.NewBinding(
 		key.WithKeys("z"),
 		key.WithHelp("z", "fold/unfold old done"),
@@ -60,6 +70,8 @@ func BoardFullHelp() []key.Binding {
 		BoardKeys.MoveLeft,
 		BoardKeys.MoveRight,
 		BoardKeys.EditFields,
+		BoardKeys.EditEstimate,
+		BoardKeys.EditActual,
 		BoardKeys.ToggleOldDone,
 		BoardKeys.Preview,
 		IssueKeys.Label,

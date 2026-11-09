@@ -100,6 +100,20 @@ func (m *Model) handleBoardKey(
 	case key.Matches(msg, keys.BoardKeys.EditFields):
 		return board.OpenEditor(), true
 
+	case key.Matches(msg, keys.BoardKeys.EditEstimate):
+		if cmd := board.OpenFieldEditor(boardsection.IsEstimateField); cmd != nil ||
+			board.IsCapturingInput() {
+			return cmd, true
+		}
+		return m.notifyErr("This project has no estimated time field"), true
+
+	case key.Matches(msg, keys.BoardKeys.EditActual):
+		if cmd := board.OpenFieldEditor(boardsection.IsActualTimeField); cmd != nil ||
+			board.IsCapturingInput() {
+			return cmd, true
+		}
+		return m.notifyErr("This project has no actual time field"), true
+
 	case key.Matches(msg, keys.BoardKeys.ToggleOldDone):
 		board.ToggleOldDone()
 		return m.onViewedRowChanged(), true

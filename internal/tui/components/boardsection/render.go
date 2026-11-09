@@ -375,6 +375,10 @@ func isEstimateField(name string) bool {
 	return strings.Contains(n, "estimat") || n == "eta"
 }
 
+func isActualField(name string) bool {
+	return strings.Contains(normalizeName(name), "actual")
+}
+
 func (m *Model) badgeLabel(f data.ProjectField, v data.ProjectFieldValue) string {
 	if v.Number == nil {
 		return v.String()
@@ -386,7 +390,7 @@ func (m *Model) badgeLabel(f data.ProjectField, v data.ProjectFieldValue) string
 		return "S" + num
 	case isEstimateField(f.Name):
 		return "ETA " + num
-	case strings.Contains(n, "actual"):
+	case isActualField(f.Name):
 		return "Act " + num
 	default:
 		return f.Name + " " + num
