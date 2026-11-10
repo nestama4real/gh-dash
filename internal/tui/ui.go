@@ -76,6 +76,7 @@ type Model struct {
 	// entering the board view, which starts with the preview closed.
 	previewBeforeBoard bool
 	mode               Mode
+	imagePopup         *imagePopup
 }
 
 type Mode int
@@ -219,6 +220,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		log.Info("Key pressed", "key", msg.String())
 		m.ctx.Error = nil
+
+		if m.imagePopup != nil {
+			m.updateImagePopup(msg)
+			return m, nil
+		}
 
 		if bs, ok := currSection.(*boardsection.Model); ok && bs.IsCapturingInput() {
 			cmd = m.updateSection(currSection.GetId(), currSection.GetType(), msg)
@@ -900,11 +906,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case images.LoadedMsg:
 		cmds = append(cmds, m.syncSidebar())
-
-	case imagesViewerClosedMsg:
-		// The terminal was handed over: send the images again.
-		images.Invalidate()
-		cmds = append(cmds, m.syncSidebar())
+		m.renderImagePopup()
 
 	case execProcessFinishedMsg, tea.FocusMsg:
 		if currSection != nil {
@@ -934,6 +936,7 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.onWindowSizeChanged(msg)
+		m.renderImagePopup()
 
 	case tea.BackgroundColorMsg:
 		log.Debugf("Setting markdownStyle in BackgroundColorMsg")
@@ -1086,6 +1089,10 @@ func (m *Model) View() tea.View {
 	if issueCmp != "" {
 		y := m.ctx.ScreenHeight - common.FooterHeight - m.issueSidebar.InputBoxLineFromButton() - common.InputBoxHeight - 6
 		layers = append(layers, lipgloss.NewLayer(issueCmp).X(previewPos.X+3).Y(y))
+	}
+
+	if l := m.imagePopupLayer(); l != nil {
+		layers = append(layers, l)
 	}
 
 	comp := lipgloss.NewCompositor(layers...)

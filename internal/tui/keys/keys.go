@@ -209,7 +209,7 @@ var Keys = &KeyMap{
 	),
 	ViewImages: key.NewBinding(
 		key.WithKeys("i"),
-		key.WithHelp("i", "view images full screen"),
+		key.WithHelp("i", "view images"),
 	),
 	SectionMode: key.NewBinding(
 		key.WithKeys("ctrl+s"),

@@ -45,8 +45,11 @@ type entry struct {
 	// pixel size and PNG data, scaled down for the terminal
 	pxW, pxH int
 	png      []byte
-	// file is the original image in the cache, for the full screen viewer
+	// file is the original image in the cache
 	file string
+	// maxCols and maxRows bound the placements, hence the resolution the
+	// image is scaled down to before being sent.
+	maxCols, maxRows int
 	// id is the kitty image id (1..255, encoded in the 256-color foreground
 	// of the placeholders); 0 when not transmitted to the terminal.
 	id         int
@@ -393,11 +396,23 @@ func replaceMarkers(rendered string, lines func(kind string, i, width int) []str
 func block(ref Ref, width int) []string {
 	reg.Lock()
 	defer reg.Unlock()
+	return sizedBlock(ref.Url, ref, min(reg.cfg.MaxWidth, width), reg.cfg.MaxHeight)
+}
 
-	e := reg.entries[ref.Url]
+// PopupBlock renders an image as large as cols×rows cells, for the image
+// popup. It is a separate, higher resolution copy of the inline image.
+func PopupBlock(ref Ref, cols, rows int) []string {
+	reg.Lock()
+	defer reg.Unlock()
+	return sizedBlock("popup\x00"+ref.Url, ref, cols, rows)
+}
+
+func sizedBlock(key string, ref Ref, maxCols, maxRows int) []string {
+	width := maxCols
+	e := reg.entries[key]
 	if e == nil {
-		e = &entry{url: ref.Url}
-		reg.entries[ref.Url] = e
+		e = &entry{url: ref.Url, maxCols: maxCols, maxRows: maxRows}
+		reg.entries[key] = e
 	}
 	switch e.state {
 	case statePending:
@@ -410,7 +425,7 @@ func block(ref Ref, width int) []string {
 		return []string{reg.faint.Render(ansi.Truncate(fmt.Sprintf("🖼 %s (%v)", label(ref), e.err), width, "…"))}
 	}
 
-	cols, rows := fit(e.pxW, e.pxH, min(reg.cfg.MaxWidth, width), reg.cfg.MaxHeight)
+	cols, rows := fit(e.pxW, e.pxH, maxCols, maxRows)
 	if cols == 0 || rows == 0 {
 		return nil
 	}
@@ -498,22 +513,6 @@ func Invalidate() {
 		e.id, e.placedCols, e.placedRows = 0, 0, 0
 	}
 	reg.byId = [256]*entry{}
-}
-
-// Files returns, for the full screen viewer, the cached file of each image,
-// or its URL when it is not downloaded yet.
-func Files(refs []Ref) []string {
-	reg.Lock()
-	defer reg.Unlock()
-	files := make([]string, 0, len(refs))
-	for _, ref := range refs {
-		if e := reg.entries[ref.Url]; e != nil && e.file != "" {
-			files = append(files, e.file)
-		} else {
-			files = append(files, ref.Url)
-		}
-	}
-	return files
 }
 
 // LoadedMsg is sent when an image has been downloaded (or failed to).

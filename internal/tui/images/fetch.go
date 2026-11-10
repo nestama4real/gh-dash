@@ -35,7 +35,10 @@ func fetchCmd(e *entry) tea.Cmd {
 		var pngData []byte
 		var w, h int
 		if err == nil {
-			pngData, w, h, err = prepare(raw)
+			reg.Lock()
+			maxCols, maxRows := e.maxCols, e.maxRows
+			reg.Unlock()
+			pngData, w, h, err = prepare(raw, maxCols, maxRows)
 		}
 		reg.Lock()
 		if err != nil {
@@ -117,15 +120,12 @@ func isGitHubHost(host string) bool {
 
 // prepare decodes an image and scales it down to what the largest allowed
 // placement can show, so that little data is sent to the terminal.
-func prepare(raw []byte) ([]byte, int, int, error) {
+func prepare(raw []byte, maxCols, maxRows int) ([]byte, int, int, error) {
 	img, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {
 		return nil, 0, 0, &decodeError{err}
 	}
 	b := img.Bounds()
-	reg.Lock()
-	maxCols, maxRows := reg.cfg.MaxWidth, reg.cfg.MaxHeight
-	reg.Unlock()
 	cw, ch := cellSize()
 	maxW, maxH := maxCols*cw, maxRows*ch
 	w, h := b.Dx(), b.Dy()
