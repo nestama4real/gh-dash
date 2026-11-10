@@ -244,13 +244,13 @@ func (m *Model) blocks(f *fileDiff, i int) []string {
 	side, no := l.position()
 	width := m.cardWidth()
 	var out []string
-	for _, t := range m.threads[f.Filename] {
+	for k, t := range m.threads[f.Filename] {
 		tSide := t.DiffSide
 		if tSide == "" {
 			tSide = "RIGHT"
 		}
 		if t.Line == no && tSide == side {
-			out = append(out, m.renderThread(t, width))
+			out = append(out, m.renderThread(t, k, width))
 		}
 	}
 	for _, d := range m.pending() {
@@ -276,7 +276,7 @@ func (m *Model) cardWidth() int {
 
 // card renders comments framed like on GitHub: a colored border around a
 // header and the comments, separated by rules.
-func (m *Model) card(colorName, header string, comments [][3]string, width int) string {
+func (m *Model) card(colorName, header string, comments [][3]string, footer string, width int) string {
 	theme := m.ctx.Theme
 	accent := m.gh(colorName)
 	inner := max(10, width-4)
@@ -296,6 +296,9 @@ func (m *Model) card(colorName, header string, comments [][3]string, width int) 
 		rows = append(rows, lipgloss.NewStyle().Foreground(theme.PrimaryText).Width(inner).
 			Render(strings.TrimSpace(c[2])))
 	}
+	if footer != "" {
+		rows = append(rows, faint.Render(strings.Repeat("─", inner)), footer)
+	}
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(accent).
@@ -311,7 +314,7 @@ func rangeLabel(start, end int) string {
 	return fmt.Sprintf("line %d", end)
 }
 
-func (m *Model) renderThread(t data.PRReviewThread, width int) string {
+func (m *Model) renderThread(t data.PRReviewThread, k int, width int) string {
 	faint := lipgloss.NewStyle().Foreground(m.ctx.Theme.FaintText)
 	colorName := "BLUE"
 	var tags []string
@@ -322,14 +325,28 @@ func (m *Model) renderThread(t data.PRReviewThread, width int) string {
 		colorName = "GRAY"
 		tags = append(tags, "✓ Resolved")
 	}
-	left := faint.Render(strings.Join(tags, "  ·  "))
-	right := faint.Render("r reply")
-	header := left + strings.Repeat(" ", max(1, width-4-ansi.StringWidth(left)-ansi.StringWidth(right))) + right
+	header := ""
+	if len(tags) > 0 {
+		header = faint.Render(strings.Join(tags, "  ·  "))
+	}
 	comments := make([][3]string, 0, len(t.Comments))
 	for _, c := range t.Comments {
 		comments = append(comments, [3]string{c.Author, "  " + utils.TimeElapsed(c.CreatedAt), c.Body})
 	}
-	return m.card(colorName, header, comments, width)
+	// Replies are written at the bottom of the conversation, like on GitHub.
+	footer := faint.Render("↳ r reply")
+	if m.isReplyingTo(t.Path, k) {
+		status := faint.Render("ctrl+s send • esc cancel")
+		switch {
+		case m.mode == modeReplying:
+			status = faint.Render("Sending…")
+		case m.status != "":
+			status = lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Render(m.status)
+		}
+		footer = lipgloss.NewStyle().Foreground(m.gh(colorName)).Bold(true).Render("Reply") +
+			"\n" + m.input.View() + "\n" + status
+	}
+	return m.card(colorName, header, comments, footer, width)
 }
 
 func (m *Model) renderDraft(d draft, width int) string {
@@ -338,7 +355,7 @@ func (m *Model) renderDraft(d draft, width int) string {
 		faint.Render("  ·  "+rangeLabel(d.StartLine, d.Line))
 	right := faint.Render("c edit · x delete")
 	gap := max(1, width-4-ansi.StringWidth(left)-ansi.StringWidth(right))
-	return m.card("YELLOW", left+strings.Repeat(" ", gap)+right, [][3]string{{"", "", d.Body}}, width)
+	return m.card("YELLOW", left+strings.Repeat(" ", gap)+right, [][3]string{{"", "", d.Body}}, "", width)
 }
 
 // mark tells how the gutter flags a line covered by comments: a bar along
@@ -420,13 +437,19 @@ func (m *Model) clampOffset() {
 		rows, blocks := m.itemRows(f, i)
 		start += rows + len(blocks)
 	}
-	curRows, _ := m.itemRows(f, cur)
+	curRows, curBlocks := m.itemRows(f, cur)
 	h := m.diffHeight()
 	if start < m.offset {
 		m.offset = start
 	}
 	if start+curRows > m.offset+h {
 		m.offset = start + curRows - h
+	}
+	// While replying, show the whole conversation and the reply box.
+	if m.mode == modeReply || m.mode == modeReplying {
+		if end := start + curRows + len(curBlocks); end > m.offset+h {
+			m.offset = min(start, end-h)
+		}
 	}
 	// Do not leave empty space at the bottom, e.g. after folding lines.
 	total := start
@@ -599,27 +622,6 @@ func (m *Model) renderDialog() string {
 		}
 		return box.Render(bold.Render("Comment on ") + faint.Render(ansi.Truncate(where, m.inputWidth()-12, "…")) +
 			"\n\n" + m.input.View() + "\n\n" + faint.Render("ctrl+s save • esc cancel"))
-
-	case modeReply, modeReplying:
-		f := m.currFile()
-		to := ""
-		if threads := m.threads[f.Filename]; m.replyTo < len(threads) && len(threads[m.replyTo].Comments) > 0 {
-			c := threads[m.replyTo].Comments
-			to = " @" + c[0].Author
-			// Show what is answered: the last comment of the conversation.
-			last := c[len(c)-1]
-			quote := faint.Render(ansi.Truncate("@"+last.Author+": "+
-				strings.Join(strings.Fields(last.Body), " "), m.inputWidth(), "…"))
-			to += "\n\n" + quote
-		}
-		status := faint.Render("ctrl+s send • esc cancel")
-		if m.mode == modeReplying {
-			status = faint.Render("Sending…")
-		} else if m.status != "" {
-			status = lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Render(m.status)
-		}
-		return box.Render(bold.Render("Reply to") + bold.Render(to) +
-			"\n\n" + m.input.View() + "\n\n" + status)
 
 	case modeSubmitChoice:
 		var lines []string

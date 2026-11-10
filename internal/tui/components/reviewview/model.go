@@ -540,14 +540,54 @@ func (m *Model) threadAt(i int) int {
 	return -1
 }
 
+// isReplyingTo reports whether the reply box is open on that conversation.
+func (m *Model) isReplyingTo(path string, k int) bool {
+	f := m.currFile()
+	return (m.mode == modeReply || m.mode == modeReplying) && f != nil &&
+		f.Filename == path && m.replyTo == k
+}
+
+// nearestThread returns the line of the current file carrying the
+// conversation closest to the cursor (below it on a tie), or -1.
+func (m *Model) nearestThread() int {
+	f := m.currFile()
+	if f == nil {
+		return -1
+	}
+	cur, best := m.currLine(), -1
+	for i := range f.lines {
+		if m.threadAt(i) < 0 {
+			continue
+		}
+		d, bd := i-cur, best-cur
+		if d < 0 {
+			d = -d
+		}
+		if bd < 0 {
+			bd = -bd
+		}
+		if best < 0 || d < bd || (d == bd && i > best) {
+			best = i
+		}
+	}
+	return best
+}
+
+// startReply opens the reply box under the conversation closest to the
+// cursor, moving the cursor to it.
 func (m Model) startReply() (Model, tea.Cmd) {
-	k := m.threadAt(m.currLine())
-	if k < 0 {
-		m.status = "No conversation on this line: move to a line with a blue ●"
+	line := m.nearestThread()
+	if line < 0 {
+		m.status = "No conversation in this file"
 		return m, nil
 	}
-	m.replyTo = k
-	m.input = m.newInput("Write a reply (ctrl+s to send, esc to cancel)")
+	m.selFrom, m.selByShift = -1, false
+	m.setLine(line)
+	m.replyTo = m.threadAt(line)
+	m.input = m.newInput("Write a reply")
+	m.input.SetWidth(max(10, m.cardWidth()-6))
+	m.input.SetHeight(4)
+	m.status = ""
 	m.mode = modeReply
 	return m, m.input.Focus()
 }

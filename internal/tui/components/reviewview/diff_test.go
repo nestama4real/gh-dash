@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
@@ -199,23 +200,42 @@ func TestReply(t *testing.T) {
 		Comments: []data.PRReviewThreadComment{{Author: "bob", Body: "Why?"}},
 	}}}
 
-	m.cursor[0] = 1 // new line 10: no conversation
+	// r picks the conversation closest to the cursor and moves to it.
+	m.cursor[0] = 1 // new line 10, three lines above bob's conversation
 	m, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	if m.mode != modeNormal || m.status == "" {
-		t.Fatalf("reply without conversation: mode %d", m.mode)
+	if m.mode != modeReply || m.replyTo != 0 || m.currLine() != 4 {
+		t.Fatalf("reply: mode %d replyTo %d cursor %d", m.mode, m.replyTo, m.currLine())
 	}
-	m.cursor[0] = 4 // new line 12: bob's conversation
+	// The reply box is in the conversation, under bob's message.
+	diff := ansi.Strip(m.renderDiff())
+	why, reply := strings.Index(diff, "Why?"), strings.Index(diff, "Reply")
+	if why < 0 || reply < 0 || reply < why {
+		t.Errorf("reply box not under the message:\n%s", diff)
+	}
+	if strings.Contains(ansi.Strip(m.renderDialog()), "Reply") {
+		t.Errorf("the reply must not be a popup")
+	}
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.mode != modeNormal {
+		t.Fatalf("esc: mode %d", m.mode)
+	}
 	m, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
-	if m.mode != modeReply || m.replyTo != 0 {
-		t.Fatalf("reply: mode %d replyTo %d", m.mode, m.replyTo)
-	}
-	if !strings.Contains(m.renderDialog(), "@bob") {
-		t.Errorf("dialog does not show who is answered")
-	}
+
 	// The reply shows once sent.
 	m, _ = m.Update(replySentMsg{path: "main.go", index: 0,
 		comment: data.PRReviewThreadComment{Author: "me", Body: "Because"}})
 	if m.mode != modeNormal || len(m.threads["main.go"][0].Comments) != 2 {
 		t.Errorf("after sending: mode %d, %d comments", m.mode, len(m.threads["main.go"][0].Comments))
+	}
+}
+
+func TestReplyWithoutConversation(t *testing.T) {
+	ctx := &context.ProgramContext{Config: &config.Config{}, Theme: *theme.DefaultTheme}
+	m := Model{ctx: ctx, pr: PR{Url: "test://none"}, cursor: map[int]int{}, selFrom: -1,
+		editing: -1, width: 120, height: 40}
+	m.files = []fileDiff{newFileDiff(data.PRFile{Filename: "main.go", Patch: patch})}
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if m.mode != modeNormal || m.status == "" {
+		t.Errorf("mode %d status %q", m.mode, m.status)
 	}
 }
