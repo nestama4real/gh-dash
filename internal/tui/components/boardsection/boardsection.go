@@ -134,7 +134,7 @@ func NewModel(
 	return m
 }
 
-func boardViews(store *Store) []data.ProjectView {
+func boardViews(store *Store, cfg *config.ScrumBoardConfig) []data.ProjectView {
 	var views []data.ProjectView
 	if store.Project == nil {
 		return nil
@@ -147,13 +147,33 @@ func boardViews(store *Store) []data.ProjectView {
 	if len(views) == 0 {
 		views = append(views, store.Project.Views...)
 	}
-	return views
+	if cfg == nil || len(cfg.TabOrder) == 0 {
+		return views
+	}
+	// The views named in tabOrder first, in that order, then the others.
+	ordered := make([]data.ProjectView, 0, len(views))
+	used := make([]bool, len(views))
+	for _, name := range cfg.TabOrder {
+		for i, v := range views {
+			if !used[i] && strings.EqualFold(strings.TrimSpace(v.Name), strings.TrimSpace(name)) {
+				ordered = append(ordered, v)
+				used[i] = true
+				break
+			}
+		}
+	}
+	for i, v := range views {
+		if !used[i] {
+			ordered = append(ordered, v)
+		}
+	}
+	return ordered
 }
 
 // InitSections builds one section per board view of the project. Before the
 // project is fetched, a single placeholder section is returned.
 func InitSections(ctx *context.ProgramContext, store *Store) []section.Section {
-	views := boardViews(store)
+	views := boardViews(store, ctx.Config.ScrumBoard)
 	if len(views) == 0 {
 		views = []data.ProjectView{{Name: ctx.Config.ScrumBoard.GetTitle()}}
 	}
@@ -165,8 +185,8 @@ func InitSections(ctx *context.ProgramContext, store *Store) []section.Section {
 }
 
 // ViewsChanged reports whether the sections no longer match the project views.
-func ViewsChanged(sections []section.Section, store *Store) bool {
-	views := boardViews(store)
+func ViewsChanged(sections []section.Section, store *Store, cfg *config.ScrumBoardConfig) bool {
+	views := boardViews(store, cfg)
 	if len(views) == 0 {
 		return false
 	}

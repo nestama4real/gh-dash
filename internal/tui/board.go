@@ -44,7 +44,7 @@ func (m *Model) onBoardFetched(msg boardsection.BoardFetchedMsg) tea.Cmd {
 	if msg.Err == nil && msg.Next == nil {
 		nextCmd = tea.Batch(nextCmd, m.onBoardIndexed())
 	}
-	if boardsection.ViewsChanged(m.board, m.boardStore) {
+	if boardsection.ViewsChanged(m.board, m.boardStore, m.ctx.Config.ScrumBoard) {
 		old := m.board
 		m.board = boardsection.InitSections(m.ctx, m.boardStore)
 		for _, s := range m.board {

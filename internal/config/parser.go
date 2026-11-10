@@ -97,6 +97,9 @@ type ScrumBoardConfig struct {
 	// CollapseOldDone groups "Done in N" columns other than the latest N
 	// into one collapsed column (default true).
 	CollapseOldDone *bool `yaml:"collapseOldDone,omitempty"`
+	// TabOrder puts the project views with these names first, in this
+	// order; the other views follow in the project's order.
+	TabOrder []string `yaml:"tabOrder,omitempty"`
 }
 
 func (c *ScrumBoardConfig) GetStatusField() string {
