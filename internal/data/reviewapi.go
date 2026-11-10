@@ -1,7 +1,9 @@
 package data
 
 import (
+	"encoding/base64"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -60,6 +62,7 @@ type PRReviewThreadComment struct {
 // PRReviewContext is what a review needs besides the diff.
 type PRReviewContext struct {
 	Id      string // node id, to submit the review
+	HeadSha string
 	Threads []PRReviewThread
 }
 
@@ -76,6 +79,7 @@ func FetchPRReviewContext(repoNameWithOwner string, number int) (PRReviewContext
 		Repository struct {
 			PullRequest struct {
 				Id            string
+				HeadRefOid    string
 				ReviewThreads struct {
 					Nodes []struct {
 						Path       string
@@ -99,7 +103,7 @@ func FetchPRReviewContext(repoNameWithOwner string, number int) (PRReviewContext
 	err = client.Do(`query ReviewContext($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      id
+      id headRefOid
       reviewThreads(first: 100) {
         nodes {
           path line startLine diffSide isOutdated isResolved
@@ -113,7 +117,7 @@ func FetchPRReviewContext(repoNameWithOwner string, number int) (PRReviewContext
 		return PRReviewContext{}, err
 	}
 	pr := resp.Repository.PullRequest
-	rc := PRReviewContext{Id: pr.Id}
+	rc := PRReviewContext{Id: pr.Id, HeadSha: pr.HeadRefOid}
 	for _, t := range pr.ReviewThreads.Nodes {
 		thread := PRReviewThread{
 			Path: t.Path, Line: t.Line, StartLine: t.StartLine, DiffSide: t.DiffSide,
@@ -127,6 +131,32 @@ func FetchPRReviewContext(repoNameWithOwner string, number int) (PRReviewContext
 		rc.Threads = append(rc.Threads, thread)
 	}
 	return rc, nil
+}
+
+// FetchFileLines returns the lines of a file at a commit.
+func FetchFileLines(repoNameWithOwner, path, ref string) ([]string, error) {
+	client, err := gh.DefaultRESTClient()
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+	}
+	escaped := strings.ReplaceAll(url.PathEscape(path), "%2F", "/")
+	if err := client.Get(fmt.Sprintf("repos/%s/contents/%s?ref=%s",
+		repoNameWithOwner, escaped, url.QueryEscape(ref)), &resp); err != nil {
+		return nil, err
+	}
+	if resp.Encoding != "base64" {
+		return nil, fmt.Errorf("the file is too large to be shown")
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(resp.Content, "\n", ""))
+	if err != nil {
+		return nil, err
+	}
+	text := strings.TrimSuffix(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
+	return strings.Split(text, "\n"), nil
 }
 
 // DraftReviewComment is a comment on a line (or a range of lines) of the

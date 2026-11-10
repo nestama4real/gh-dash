@@ -68,6 +68,10 @@ type Model struct {
 	offset   int         // first visible row of the diff
 	selFrom  int         // start of the range selection, -1 when none
 	showTree bool
+	// selByShift is true for a selection made with shift+up/down: it ends
+	// with the next plain move.
+	selByShift bool
+	headSha    string
 
 	mode     mode
 	editing  int // index of the pending comment being edited, -1 for a new one
@@ -156,7 +160,7 @@ func (m *Model) setFile(i int) {
 	}
 	m.fileIdx = i
 	m.offset = 0
-	m.selFrom = -1
+	m.selFrom, m.selByShift = -1, false
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -168,6 +172,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.prId = msg.context.Id
+		m.headSha = msg.context.HeadSha
 		m.threads = map[string][]data.PRReviewThread{}
 		for _, t := range msg.context.Threads {
 			if !t.IsOutdated {
@@ -175,7 +180,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 		}
 		for _, f := range msg.files {
-			m.files = append(m.files, fileDiff{PRFile: f, lines: parsePatch(f.Patch)})
+			m.files = append(m.files, newFileDiff(f))
 		}
 		sort.SliceStable(m.files, func(i, j int) bool { return m.files[i].Filename < m.files[j].Filename })
 		// Start on the first changed line.
@@ -184,6 +189,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.cursor[0] = i
 				break
 			}
+		}
+		return m, nil
+
+	case contentMsg:
+		if msg.fileIdx >= len(m.files) {
+			return m, nil
+		}
+		f := &m.files[msg.fileIdx]
+		f.content, f.contentErr = msg.lines, msg.err
+		if msg.err != nil {
+			m.status = "Could not load the file: " + msg.err.Error()
+			return m, nil
+		}
+		if msg.fileIdx == m.fileIdx {
+			m.expandAt(msg.lineIdx, msg.n)
 		}
 		return m, nil
 
@@ -228,10 +248,31 @@ func (m *Model) files0Lines() []diffLine {
 func (m Model) updateNormal(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	m.status = ""
 	page := max(1, m.diffHeight()/2)
-	switch msg.String() {
+	k := msg.String()
+	switch k {
+	case "shift+down", "shift+up":
+		if m.selFrom < 0 {
+			if f := m.currFile(); f != nil && len(f.lines) > 0 {
+				m.selFrom, m.selByShift = m.currLine(), true
+			}
+		}
+		if k == "shift+down" {
+			m.setLine(m.currLine() + 1)
+		} else {
+			m.setLine(m.currLine() - 1)
+		}
+		return m, nil
+	case "j", "down", "k", "up", "ctrl+d", "pgdown", "ctrl+u", "pgup",
+		"g", "home", "G", "end", "}", "{", "]", "tab", "J", "[", "shift+tab", "K":
+		// A shift selection ends with the next plain move.
+		if m.selByShift {
+			m.selFrom, m.selByShift = -1, false
+		}
+	}
+	switch k {
 	case "q", "esc":
 		if m.selFrom >= 0 && msg.String() == "esc" {
-			m.selFrom = -1
+			m.selFrom, m.selByShift = -1, false
 			return m, nil
 		}
 		return m, func() tea.Msg { return ClosedMsg{} }
@@ -259,10 +300,14 @@ func (m Model) updateNormal(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.showTree = !m.showTree
 	case "v", "V":
 		if m.selFrom >= 0 {
-			m.selFrom = -1
+			m.selFrom, m.selByShift = -1, false
 		} else if f := m.currFile(); f != nil && len(f.lines) > 0 {
 			m.selFrom = m.currLine()
 		}
+	case "e":
+		return m.startExpand(20)
+	case "E":
+		return m.startExpand(0)
 	case "c", "enter":
 		return m.startCompose()
 	case "x":
@@ -272,6 +317,66 @@ func (m Model) updateNormal(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.status = ""
 	}
 	return m, nil
+}
+
+type contentMsg struct {
+	fileIdx, lineIdx, n int
+	lines               []string
+	err                 error
+}
+
+// startExpand shows unchanged lines at the expander under the cursor,
+// fetching the file first if needed. n <= 0 shows all of them.
+func (m Model) startExpand(n int) (Model, tea.Cmd) {
+	f := m.currFile()
+	if f == nil || len(f.lines) == 0 {
+		return m, nil
+	}
+	i := m.currLine()
+	if !f.lines[i].isExpander() {
+		m.status = "Move to a ⋯ line to show the unchanged lines there"
+		return m, nil
+	}
+	if start, end := f.gap(i); end >= 0 && end < start {
+		m.status = "No hidden line here"
+		return m, nil
+	}
+	if f.content != nil {
+		m.expandAt(i, n)
+		return m, nil
+	}
+	if f.contentErr != nil || m.headSha == "" {
+		m.status = "The file cannot be loaded"
+		return m, nil
+	}
+	m.status = "Loading the file…"
+	repo, path, sha, fileIdx := m.pr.Repo, f.Filename, m.headSha, m.fileIdx
+	return m, func() tea.Msg {
+		lines, err := data.FetchFileLines(repo, path, sha)
+		return contentMsg{fileIdx: fileIdx, lineIdx: i, n: n, lines: lines, err: err}
+	}
+}
+
+func (m *Model) expandAt(i, n int) {
+	f := m.currFile()
+	if f == nil || i >= len(f.lines) || !f.lines[i].isExpander() {
+		return
+	}
+	m.status = ""
+	m.selFrom, m.selByShift = -1, false
+	before := len(f.lines)
+	at := f.expand(i, n)
+	switch {
+	case at >= 0:
+		// Stay on the expander, so that e goes on.
+		m.setLine(at)
+	default:
+		// The tail is fully shown: land on its last line.
+		m.setLine(i + len(f.lines) - before)
+	}
+	if len(f.lines) == before {
+		m.status = "No hidden line here"
+	}
 }
 
 func (m *Model) jumpHunk(dir int) {
@@ -368,7 +473,7 @@ func (m *Model) saveDraft(body string) {
 			pending[m.editing].Body = body
 		}
 		m.setPending(pending)
-		m.selFrom = -1
+		m.selFrom, m.selByShift = -1, false
 		return
 	}
 	if body == "" {
@@ -385,7 +490,7 @@ func (m *Model) saveDraft(body string) {
 		}
 	}
 	m.setPending(append(pending, d))
-	m.selFrom = -1
+	m.selFrom, m.selByShift = -1, false
 }
 
 func (m *Model) deletePendingAtCursor() {

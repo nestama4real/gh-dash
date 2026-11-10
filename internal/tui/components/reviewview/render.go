@@ -343,6 +343,10 @@ func (m *Model) renderDiff() string {
 			style = lipgloss.NewStyle().Foreground(m.gh("BLUE")).Background(m.tint("BLUE", 0.12))
 		case lineNote:
 			style = lipgloss.NewStyle().Foreground(theme.FaintText).Italic(true)
+		case lineExpanded:
+			style = lipgloss.NewStyle().Foreground(theme.FaintText)
+		case lineTail:
+			style = lipgloss.NewStyle().Foreground(m.gh("BLUE")).Background(m.tint("BLUE", 0.12))
 		default:
 			style = lipgloss.NewStyle().Foreground(theme.PrimaryText)
 		}
@@ -358,13 +362,22 @@ func (m *Model) renderDiff() string {
 		}
 
 		text := expandTabs(l.text)
-		if l.kind == lineHunk {
+		switch l.kind {
+		case lineHunk:
 			text = strings.TrimSpace(text)
+			if start, end := f.gap(i); end >= start && i == cur {
+				text += fmt.Sprintf("   e: show 20 hidden lines · E: all %d", end-start+1)
+			}
+		case lineTail:
+			text = "Rest of the file"
+			if i == cur {
+				text += "   e: show 20 more lines · E: all"
+			}
 		}
 		wrapped := strings.Split(ansi.Hardwrap(text, avail, true), "\n")
 		for r, part := range wrapped {
 			gutter := strings.Repeat(" ", gutterWidth)
-			if r == 0 && l.kind != lineHunk {
+			if r == 0 && !l.isExpander() {
 				gutter = num(l.oldNo) + " " + num(l.newNo) + " " + marker
 			} else if r == 0 {
 				gutter = strings.Repeat(" ", gutterWidth-1) + "⋯"
@@ -397,7 +410,7 @@ func (m *Model) renderHint() string {
 	case m.selFrom >= 0:
 		hint = faint.Render("selecting lines: j/k extend • c comment the range • esc cancel")
 	default:
-		hint = faint.Render("j/k line • {/} hunk • [/] file • v select • c comment • x delete • t files • S submit • q back")
+		hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • x delete • e expand • {/} hunk • [/] file • t files • S submit • q back")
 	}
 	return ansi.Truncate(" "+hint, m.width, "…")
 }
