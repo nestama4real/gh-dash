@@ -2,6 +2,7 @@ package sidebar
 
 import (
 	"fmt"
+	"github.com/dlvhdr/gh-dash/v4/internal/config"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/viewport"
@@ -44,10 +45,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 		case key.Matches(msg, keys.Keys.PageUp):
 			m.viewport.HalfPageUp()
+
+		// One line at a time, like j/k. Not in the notifications view,
+		// where D marks a notification as done.
+		case key.Matches(msg, keys.Keys.LineDown) && !m.inNotifications():
+			m.viewport.ScrollDown(1)
+
+		case key.Matches(msg, keys.Keys.LineUp) && !m.inNotifications():
+			m.viewport.ScrollUp(1)
 		}
 	}
 
 	return m, nil
+}
+
+func (m Model) inNotifications() bool {
+	return m.ctx != nil && m.ctx.View == config.NotificationsView
 }
 
 func (m Model) View() string {

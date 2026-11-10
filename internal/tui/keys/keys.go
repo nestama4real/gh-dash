@@ -41,6 +41,8 @@ type KeyMap struct {
 	Redraw                key.Binding
 	PageDown              key.Binding
 	PageUp                key.Binding
+	LineDown              key.Binding
+	LineUp                key.Binding
 	NextSection           key.Binding
 	PrevSection           key.Binding
 	Search                key.Binding
@@ -123,6 +125,8 @@ func (k KeyMap) NavigationKeys() []key.Binding {
 		k.LastLine,
 		k.PageDown,
 		k.PageUp,
+		k.LineDown,
+		k.LineUp,
 	}
 }
 
@@ -190,6 +194,14 @@ var Keys = &KeyMap{
 	PageUp: key.NewBinding(
 		key.WithKeys("ctrl+u"),
 		key.WithHelp("Ctrl+u", "preview page up"),
+	),
+	LineDown: key.NewBinding(
+		key.WithKeys("D"),
+		key.WithHelp("D", "preview line down"),
+	),
+	LineUp: key.NewBinding(
+		key.WithKeys("U"),
+		key.WithHelp("U", "preview line up"),
 	),
 	NextSection: key.NewBinding(
 		key.WithKeys("right", "l"),
@@ -332,6 +344,10 @@ func rebindUniversal(universal []config.Keybinding) error {
 			key = &Keys.PageDown
 		case "pageUp":
 			key = &Keys.PageUp
+		case "lineDown":
+			key = &Keys.LineDown
+		case "lineUp":
+			key = &Keys.LineUp
 		case "nextSection":
 			key = &Keys.NextSection
 		case "prevSection":
