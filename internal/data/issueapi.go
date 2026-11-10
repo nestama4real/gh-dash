@@ -30,6 +30,26 @@ type IssueData struct {
 	Comments          IssueComments  `graphql:"comments(last: 15)"`
 	Reactions         IssueReactions `graphql:"reactions(first: 1)"`
 	Labels            IssueLabels    `graphql:"labels(first: 20)"`
+	IssueType         *IssueType     `graphql:"issueType"`
+	// ClosedByPullRequestsReferences are the PRs linked to the issue.
+	ClosedByPullRequestsReferences LinkedPullRequests `graphql:"closedByPullRequestsReferences(first: 5, includeClosedPrs: true)"`
+}
+
+// IssueType is the GitHub issue type (Task, Bug, Feature...).
+type IssueType struct {
+	Name  string
+	Color string // GitHub color name: GRAY, BLUE, GREEN...
+}
+
+type LinkedPullRequest struct {
+	Number  int
+	State   string // OPEN, CLOSED, MERGED
+	IsDraft bool
+	Url     string
+}
+
+type LinkedPullRequests struct {
+	Nodes []LinkedPullRequest
 }
 
 type IssueComments struct {

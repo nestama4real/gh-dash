@@ -176,7 +176,13 @@ query BoardProject($owner: String!, $number: Int!, $first: Int!, $after: String,
             }
             content {
               __typename
-              ... on Issue { ` + projectIssueFields + ` }
+              ... on Issue {
+                ` + projectIssueFields + `
+                issueType { name color }
+                closedByPullRequestsReferences(first: 5, includeClosedPrs: true) {
+                  nodes { number state isDraft url }
+                }
+              }
               ... on PullRequest { ` + projectIssueFields + ` }
               ... on DraftIssue {
                 title body createdAt updatedAt

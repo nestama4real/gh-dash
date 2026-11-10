@@ -748,12 +748,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		cmds = append(cmds, fetchSectionsCmds, m.tabs.Init(), fetchUser,
-			m.doRefreshAtInterval(), m.doUpdateFooterAtInterval())
+			m.doRefreshAtInterval(), m.doUpdateFooterAtInterval(),
+			m.fetchBoardInBackground())
 
 	case intervalRefresh:
 		fetchSectionsCmds := m.fetchAllViewSections()
 		m.updateTabs()
-		cmds = append(cmds, fetchSectionsCmds, m.doRefreshAtInterval())
+		cmds = append(cmds, fetchSectionsCmds, m.doRefreshAtInterval(),
+			m.fetchBoardInBackground())
 
 	case boardsection.BoardFetchedMsg:
 		cmds = append(cmds, m.onBoardFetched(msg))
@@ -1634,6 +1636,10 @@ func (m *Model) switchSelectedView() tea.Cmd {
 		m.sidebar.IsOpen = false
 	} else if prevView == config.BoardView {
 		m.sidebar.IsOpen = m.previewBeforeBoard
+	}
+	if m.ctx.View == config.IssuesView {
+		// Board edits may have changed the scrum columns.
+		m.refreshIssueRows()
 	}
 
 	m.syncMainContentDimensions()

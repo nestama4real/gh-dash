@@ -211,6 +211,26 @@ func GetSectionColumns(
 		dLayout.Reactions,
 		sLayout.Reactions,
 	)
+	withWidth := func(c config.ColumnConfig, width int) config.ColumnConfig {
+		if c.Width == nil {
+			c.Width = utils.IntPtr(width)
+		}
+		return c
+	}
+	typeLayout := withWidth(config.MergeColumnConfigs(dLayout.Type, sLayout.Type), 8)
+	statusFieldLayout := withWidth(config.MergeColumnConfigs(dLayout.Status, sLayout.Status), 16)
+	priorityLayout := withWidth(config.MergeColumnConfigs(dLayout.Priority, sLayout.Priority), 4)
+	etaLayout := withWidth(config.MergeColumnConfigs(dLayout.Eta, sLayout.Eta), 5)
+	labelsLayout := withWidth(config.MergeColumnConfigs(dLayout.Labels, sLayout.Labels), 15)
+	prLayout := withWidth(config.MergeColumnConfigs(dLayout.Pr, sLayout.Pr), 8)
+	// The scrum columns only make sense with a scrum board.
+	noBoard := !ctx.Config.HasScrumBoard()
+	hiddenWithoutBoard := func(c config.ColumnConfig) bool {
+		return noBoard || (c.Hidden != nil && *c.Hidden)
+	}
+	isHidden := func(c config.ColumnConfig) bool {
+		return c.Hidden != nil && *c.Hidden
+	}
 
 	return []table.Column{
 		{
@@ -229,14 +249,51 @@ func GetSectionColumns(
 			Hidden: titleLayout.Hidden,
 		},
 		{
+			Title:  "Type",
+			NoWrap: true,
+			Width:  typeLayout.Width,
+			Hidden: utils.BoolPtr(isHidden(typeLayout)),
+		},
+		{
+			Title:  "Status",
+			NoWrap: true,
+			Width:  statusFieldLayout.Width,
+			Hidden: utils.BoolPtr(hiddenWithoutBoard(statusFieldLayout)),
+		},
+		{
+			Title:  "P",
+			NoWrap: true,
+			Width:  priorityLayout.Width,
+			Hidden: utils.BoolPtr(hiddenWithoutBoard(priorityLayout)),
+		},
+		{
+			Title:  "ETA",
+			NoWrap: true,
+			Width:  etaLayout.Width,
+			Hidden: utils.BoolPtr(hiddenWithoutBoard(etaLayout)),
+		},
+		{
+			Title:  "Labels",
+			NoWrap: true,
+			Width:  labelsLayout.Width,
+			Hidden: utils.BoolPtr(isHidden(labelsLayout)),
+		},
+		{
 			Title:  "Creator",
 			Width:  creatorLayout.Width,
 			Hidden: creatorLayout.Hidden,
 		},
 		{
 			Title:  "Assignees",
+			NoWrap: true,
 			Width:  assigneesLayout.Width,
 			Hidden: assigneesLayout.Hidden,
+		},
+		{
+			Title:  "PR",
+			NoWrap: true,
+			Width:  prLayout.Width,
+			Hidden: utils.BoolPtr(isHidden(prLayout)),
 		},
 		{
 			Title:  constants.CommentsIcon,
@@ -273,6 +330,13 @@ func (m Model) BuildRows() []table.Row {
 	}
 
 	return rows
+}
+
+// RefreshRows re-renders the rows, e.g. once the scrum board is loaded.
+func (m *Model) RefreshRows() {
+	if m.Issues != nil {
+		m.Table.SetRows(m.BuildRows())
+	}
 }
 
 func (m *Model) NumRows() int {

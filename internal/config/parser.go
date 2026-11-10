@@ -90,6 +90,10 @@ type ScrumBoardConfig struct {
 	Title  string `yaml:"title,omitempty"`
 	// StatusField is the single-select field used for columns (default "Status").
 	StatusField string `yaml:"statusField,omitempty"`
+	// PriorityField and EstimateField are shown on issue rows
+	// (defaults "Priority" and "Estimated Time").
+	PriorityField string `yaml:"priorityField,omitempty"`
+	EstimateField string `yaml:"estimateField,omitempty"`
 	// CollapseOldDone groups "Done in N" columns other than the latest N
 	// into one collapsed column (default true).
 	CollapseOldDone *bool `yaml:"collapseOldDone,omitempty"`
@@ -100,6 +104,20 @@ func (c *ScrumBoardConfig) GetStatusField() string {
 		return "Status"
 	}
 	return c.StatusField
+}
+
+func (c *ScrumBoardConfig) GetPriorityField() string {
+	if c == nil || c.PriorityField == "" {
+		return "Priority"
+	}
+	return c.PriorityField
+}
+
+func (c *ScrumBoardConfig) GetEstimateField() string {
+	if c == nil || c.EstimateField == "" {
+		return "Estimated Time"
+	}
+	return c.EstimateField
 }
 
 func (c *ScrumBoardConfig) GetTitle() string {
@@ -210,6 +228,14 @@ type IssuesLayoutConfig struct {
 	Assignees   ColumnConfig `yaml:"assignees,omitempty"`
 	Comments    ColumnConfig `yaml:"comments,omitempty"`
 	Reactions   ColumnConfig `yaml:"reactions,omitempty"`
+	// Type is the GitHub issue type; Status, Priority and Eta come from the
+	// scrum board; Pr shows the linked pull requests.
+	Type     ColumnConfig `yaml:"type,omitempty"`
+	Status   ColumnConfig `yaml:"status,omitempty"`
+	Priority ColumnConfig `yaml:"priority,omitempty"`
+	Eta      ColumnConfig `yaml:"eta,omitempty"`
+	Labels   ColumnConfig `yaml:"labels,omitempty"`
+	Pr       ColumnConfig `yaml:"pr,omitempty"`
 }
 
 type LayoutConfig struct {

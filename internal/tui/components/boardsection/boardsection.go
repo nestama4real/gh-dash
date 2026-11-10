@@ -58,7 +58,13 @@ func (s *Store) LoadCache(cfg *config.Config) {
 	s.cacheLoaded = true
 	if p, at, ok := data.LoadCachedProject(cfg.ScrumBoard.Owner, cfg.ScrumBoard.Number); ok {
 		s.Project, s.FetchedAt = p, at
+		s.Reindex(cfg)
 	}
+}
+
+// Reindex publishes the project to the other views (issue rows, PR filters).
+func (s *Store) Reindex(cfg *config.Config) {
+	data.SetProjectIndex(s.Project, cfg.ScrumBoard.GetStatusField())
 }
 
 type column struct {
@@ -263,6 +269,7 @@ func (s *Store) HandleFetched(ctx *context.ProgramContext, sectionId int, msg Bo
 	s.Project, s.staging = s.staging, nil
 	s.FetchedAt = time.Now()
 	s.fetching, s.IsLoading, s.Err = false, false, nil
+	s.Reindex(ctx.Config)
 	cfg := ctx.Config.ScrumBoard
 	project, at := s.Project, s.FetchedAt
 	return func() tea.Msg {
@@ -738,6 +745,7 @@ func (m *Model) setField(item *data.ProjectItem, field data.ProjectField,
 	if value != nil {
 		newVal = value.String()
 	}
+	m.store.Reindex(m.Ctx.Config)
 	taskId := fmt.Sprintf("board_set_%s_%s_%d", item.Id, field.Id, time.Now().UnixNano())
 	task := context.Task{
 		Id:           taskId,
@@ -774,6 +782,7 @@ func (m *Model) revertField(msg fieldUpdatedMsg) {
 	} else {
 		item.FieldValues[msg.fieldName] = *msg.previous
 	}
+	m.store.Reindex(m.Ctx.Config)
 }
 
 // MoveCard moves the selected card to the previous (-1) or next (+1) status.

@@ -36,6 +36,9 @@ type Column struct {
 	ComputedWidth int
 	Grow          *bool
 	Align         *lipgloss.Position // Optional alignment (defaults to left)
+	// NoWrap truncates single-line cells with an ellipsis instead of
+	// wrapping them onto the next line.
+	NoWrap bool
 }
 
 type Row []string
@@ -354,6 +357,9 @@ func (m *Model) renderRow(rowId int, headerColumns []string) string {
 			}
 			renderedCol = strings.Join(renderedLines, "\n")
 		} else {
+			if column.NoWrap && lipgloss.Width(col) > contentWidth {
+				col = ansi.Truncate(col, contentWidth, "…")
+			}
 			cellStyle := style.
 				Width(colWidth).
 				MaxWidth(colWidth).

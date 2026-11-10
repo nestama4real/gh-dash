@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"charm.land/log/v2"
@@ -533,18 +534,51 @@ func FetchPullRequests(query string, limit int, pageInfo *PageInfo) (PullRequest
 		return PullRequestsResponse{}, err
 	}
 
-	var queryResult struct {
-		Search struct {
-			Nodes []struct {
-				PullRequest PullRequestData `graphql:"... on PullRequest"`
-			}
-			IssueCount int
-			PageInfo   PageInfo
-		} `graphql:"search(type: ISSUE, first: $limit, after: $endCursor, query: $query)"`
-	}
+	query, localFilters := splitLocalPRQualifiers(query)
+
 	var endCursor *string
 	if pageInfo != nil {
 		endCursor = &pageInfo.EndCursor
+	}
+	res, err := searchPullRequests(query, limit, endCursor)
+	if err != nil || len(localFilters) == 0 {
+		return res, err
+	}
+
+	// Filtered locally: gather pages until enough PRs match, so that the
+	// section's count stays right.
+	var prs []PullRequestData
+	for page := 0; ; page++ {
+		for _, pr := range res.Prs {
+			if matchesLocalFilters(pr, localFilters) {
+				prs = append(prs, pr)
+			}
+		}
+		if !res.PageInfo.HasNextPage || len(prs) >= limit || page >= 4 {
+			break
+		}
+		cursor := res.PageInfo.EndCursor
+		if res, err = searchPullRequests(query, limit, &cursor); err != nil {
+			return PullRequestsResponse{}, err
+		}
+	}
+	if prs == nil {
+		prs = []PullRequestData{}
+	}
+	return PullRequestsResponse{
+		Prs:        prs,
+		TotalCount: len(prs),
+		PageInfo:   PageInfo{HasNextPage: false, EndCursor: res.PageInfo.EndCursor},
+	}, nil
+}
+
+func searchPullRequests(query string, limit int, endCursor *string) (PullRequestsResponse, error) {
+	type searchResult struct {
+		Nodes []struct {
+			PullRequest PullRequestData `graphql:"... on PullRequest"`
+		}
+		IssueCount int
+		PageInfo   PageInfo
 	}
 	variables := map[string]any{
 		"query":     graphql.String(makePullRequestsQuery(query)),
@@ -552,22 +586,83 @@ func FetchPullRequests(query string, limit int, pageInfo *PageInfo) (PullRequest
 		"endCursor": (*graphql.String)(endCursor),
 	}
 	log.Debug("Fetching PRs", "query", query, "limit", limit, "endCursor", endCursor)
-	err = client.Query("SearchPullRequests", &queryResult, variables)
+
+	// Plain search does not support OR and parentheses: use the advanced
+	// search for queries that need them.
+	var result searchResult
+	var err error
+	if usesAdvancedSearch(query) {
+		var queryResult struct {
+			Search searchResult `graphql:"search(type: ISSUE_ADVANCED, first: $limit, after: $endCursor, query: $query)"`
+		}
+		err = client.Query("SearchPullRequestsAdvanced", &queryResult, variables)
+		result = queryResult.Search
+	} else {
+		var queryResult struct {
+			Search searchResult `graphql:"search(type: ISSUE, first: $limit, after: $endCursor, query: $query)"`
+		}
+		err = client.Query("SearchPullRequests", &queryResult, variables)
+		result = queryResult.Search
+	}
 	if err != nil {
 		return PullRequestsResponse{}, err
 	}
-	log.Info("Successfully fetched PRs", "count", queryResult.Search.IssueCount)
+	log.Info("Successfully fetched PRs", "count", result.IssueCount)
 
-	prs := make([]PullRequestData, 0, len(queryResult.Search.Nodes))
-	for _, node := range queryResult.Search.Nodes {
+	prs := make([]PullRequestData, 0, len(result.Nodes))
+	for _, node := range result.Nodes {
 		prs = append(prs, node.PullRequest)
 	}
-
 	return PullRequestsResponse{
 		Prs:        prs,
-		TotalCount: queryResult.Search.IssueCount,
-		PageInfo:   queryResult.Search.PageInfo,
+		TotalCount: result.IssueCount,
+		PageInfo:   result.PageInfo,
 	}, nil
+}
+
+func usesAdvancedSearch(query string) bool {
+	return strings.Contains(query, " OR ") || strings.Contains(query, " AND ") ||
+		strings.ContainsAny(query, "()")
+}
+
+type prFilter func(PullRequestData) bool
+
+// splitLocalPRQualifiers removes the qualifiers GitHub's search does not
+// support and that gh-dash applies itself:
+//   - no:reviewer      no review requested and no review submitted
+//   - sprint:current   closes an issue of the scrum board's current sprint
+func splitLocalPRQualifiers(query string) (string, []prFilter) {
+	var kept []string
+	var filters []prFilter
+	for _, tok := range strings.Fields(query) {
+		switch strings.ToLower(tok) {
+		case "no:reviewer", "no:reviewers":
+			filters = append(filters, func(pr PullRequestData) bool {
+				return pr.ReviewRequests.TotalCount == 0 && pr.Reviews.TotalCount == 0
+			})
+		case "sprint:current":
+			filters = append(filters, func(pr PullRequestData) bool {
+				return IsPRInCurrentSprint(pr.Repository.NameWithOwner, pr.Number)
+			})
+		default:
+			kept = append(kept, tok)
+		}
+	}
+	return strings.Join(kept, " "), filters
+}
+
+func matchesLocalFilters(pr PullRequestData, filters []prFilter) bool {
+	for _, f := range filters {
+		if !f(pr) {
+			return false
+		}
+	}
+	return true
+}
+
+// HasBoardPRQualifier reports whether a PR filter depends on the scrum board.
+func HasBoardPRQualifier(query string) bool {
+	return strings.Contains(strings.ToLower(query), "sprint:current")
 }
 
 func FetchPullRequest(prUrl string) (EnrichedPullRequestData, error) {

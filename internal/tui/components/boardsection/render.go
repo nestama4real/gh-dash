@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
 )
 
@@ -20,27 +21,8 @@ const (
 	columnHeaderHeight   = 4 // title, 2 description lines, blank
 )
 
-// GitHub Projects option colors, for dark and light backgrounds.
-var ghColors = map[string][2]string{
-	"GRAY":   {"#9198a1", "#59636e"},
-	"BLUE":   {"#4493f8", "#0969da"},
-	"GREEN":  {"#3fb950", "#1a7f37"},
-	"YELLOW": {"#d29922", "#9a6700"},
-	"ORANGE": {"#db6d28", "#bc4c00"},
-	"RED":    {"#f85149", "#d1242f"},
-	"PINK":   {"#db61a2", "#bf3989"},
-	"PURPLE": {"#ab7df8", "#8250df"},
-}
-
 func (m *Model) ghHex(name string) string {
-	c, ok := ghColors[strings.ToUpper(name)]
-	if !ok {
-		c = ghColors["GRAY"]
-	}
-	if m.Ctx.HasDarkBackground {
-		return c[0]
-	}
-	return c[1]
+	return common.GhHex(name, m.Ctx.HasDarkBackground)
 }
 
 func (m *Model) ghColor(name string) color.Color {
