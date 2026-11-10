@@ -12,6 +12,7 @@ import (
 
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
+	"github.com/dlvhdr/gh-dash/v4/internal/utils"
 )
 
 const (
@@ -204,7 +205,7 @@ func (m *Model) blocks(f *fileDiff, i int) []string {
 		return nil
 	}
 	side, no := l.position()
-	width := max(20, min(100, m.diffWidth()-gutterWidth-1))
+	width := m.cardWidth()
 	var out []string
 	for _, t := range m.threads[f.Filename] {
 		tSide := t.DiffSide
@@ -232,87 +233,133 @@ func (m *Model) indentBlock(s string) []string {
 	return lines
 }
 
-// commentBox renders comments in a box tinted with the given color, so that
-// they stand out from the code. Every piece carries the background: inner
-// styles would otherwise reset it.
-func (m *Model) commentBox(colorName, title string, sections [][2]string, width int) string {
+func (m *Model) cardWidth() int {
+	return max(20, min(110, m.diffWidth()-gutterWidth-1))
+}
+
+// card renders comments framed like on GitHub: a colored border around a
+// header and the comments, separated by rules.
+func (m *Model) card(colorName, header string, comments [][3]string, width int) string {
 	theme := m.ctx.Theme
-	bg := m.tint(colorName, 0.13)
 	accent := m.gh(colorName)
 	inner := max(10, width-4)
-	line := func(s lipgloss.Style, text string) string {
-		return s.Background(bg).Width(inner).Render(text)
+	faint := lipgloss.NewStyle().Foreground(theme.FaintText)
+	var rows []string
+	if header != "" {
+		rows = append(rows, header)
 	}
-	rows := []string{line(lipgloss.NewStyle().Foreground(accent).Bold(true), title)}
-	for _, sec := range sections {
-		rows = append(rows, line(lipgloss.NewStyle(), ""))
-		if sec[0] != "" {
-			rows = append(rows, line(lipgloss.NewStyle().Foreground(accent).Bold(true), sec[0]))
+	for i, c := range comments {
+		if i > 0 || header != "" {
+			rows = append(rows, faint.Render(strings.Repeat("─", inner)))
 		}
-		rows = append(rows, line(lipgloss.NewStyle().Foreground(theme.PrimaryText), sec[1]))
+		if c[0] != "" {
+			rows = append(rows, lipgloss.NewStyle().Foreground(accent).Bold(true).Render(c[0])+
+				faint.Render(c[1]))
+		}
+		rows = append(rows, lipgloss.NewStyle().Foreground(theme.PrimaryText).Width(inner).
+			Render(strings.TrimSpace(c[2])))
 	}
 	return lipgloss.NewStyle().
-		Border(lipgloss.ThickBorder(), false, false, false, true).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(accent).
-		BorderBackground(bg).
-		Background(bg).
 		Padding(0, 1).
 		Width(width).
 		Render(strings.Join(rows, "\n"))
 }
 
+func rangeLabel(start, end int) string {
+	if start > 0 && start != end {
+		return fmt.Sprintf("lines %d–%d", start, end)
+	}
+	return fmt.Sprintf("line %d", end)
+}
+
 func (m *Model) renderThread(t data.PRReviewThread, width int) string {
-	var sections [][2]string
-	for _, c := range t.Comments {
-		sections = append(sections, [2]string{"@" + c.Author, strings.TrimSpace(c.Body)})
-	}
-	title := "💬 Conversation"
+	faint := lipgloss.NewStyle().Foreground(m.ctx.Theme.FaintText)
 	colorName := "BLUE"
+	var tags []string
+	if t.StartLine > 0 && t.StartLine != t.Line {
+		tags = append(tags, "Comment on "+rangeLabel(t.StartLine, t.Line))
+	}
 	if t.IsResolved {
-		title += " · resolved"
 		colorName = "GRAY"
+		tags = append(tags, "✓ Resolved")
 	}
-	if n := len(t.Comments); n > 1 {
-		title += fmt.Sprintf(" · %d comments", n)
+	header := ""
+	if len(tags) > 0 {
+		header = faint.Render(strings.Join(tags, "  ·  "))
 	}
-	return m.commentBox(colorName, title, sections, width)
+	comments := make([][3]string, 0, len(t.Comments))
+	for _, c := range t.Comments {
+		comments = append(comments, [3]string{c.Author, "  " + utils.TimeElapsed(c.CreatedAt), c.Body})
+	}
+	return m.card(colorName, header, comments, width)
 }
 
 func (m *Model) renderDraft(d draft, width int) string {
-	label := "✎ Pending comment"
-	if d.StartLine > 0 && d.StartLine != d.Line {
-		label = fmt.Sprintf("✎ Pending comment on lines %d-%d", d.StartLine, d.Line)
-	}
-	return m.commentBox("YELLOW", label+"  ·  c edit · x delete",
-		[][2]string{{"", d.Body}}, width)
+	faint := lipgloss.NewStyle().Foreground(m.ctx.Theme.FaintText)
+	left := lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Bold(true).Render("✎ Pending") +
+		faint.Render("  ·  "+rangeLabel(d.StartLine, d.Line))
+	right := faint.Render("c edit · x delete")
+	gap := max(1, width-4-ansi.StringWidth(left)-ansi.StringWidth(right))
+	return m.card("YELLOW", left+strings.Repeat(" ", gap)+right, [][3]string{{"", "", d.Body}}, width)
 }
 
-// hasComments reports whether comments are shown under line i, and their
-// color.
-func (m *Model) commentMark(f *fileDiff, i int) (string, bool) {
-	l := f.lines[i]
-	if !l.commentable() {
-		return "", false
+// mark tells how the gutter flags a line covered by comments: a bar along
+// the commented range and a dot on its last line, where the comments show.
+type mark struct {
+	color string
+	end   bool
+}
+
+// marks computes the gutter marks of a file: pending comments over threads.
+func (m *Model) marks(f *fileDiff) map[int]mark {
+	index := map[string]int{}
+	for i, l := range f.lines {
+		if l.commentable() {
+			side, no := l.position()
+			index[fmt.Sprintf("%s%d", side, no)] = i
+		}
 	}
-	side, no := l.position()
-	for _, d := range m.pending() {
-		if d.Path == f.Filename && d.Side == side && d.Line == no {
-			return "YELLOW", true
+	marks := map[int]mark{}
+	add := func(color, side string, line int, startSide string, startLine int, override bool) {
+		end, ok := index[fmt.Sprintf("%s%d", side, line)]
+		if !ok {
+			return
+		}
+		start := end
+		if startLine > 0 {
+			if startSide == "" {
+				startSide = side
+			}
+			if i, ok := index[fmt.Sprintf("%s%d", startSide, startLine)]; ok && i <= end {
+				start = i
+			}
+		}
+		for i := start; i <= end; i++ {
+			if _, taken := marks[i]; taken && !override {
+				continue
+			}
+			marks[i] = mark{color: color, end: i == end || marks[i].end}
 		}
 	}
 	for _, t := range m.threads[f.Filename] {
-		tSide := t.DiffSide
-		if tSide == "" {
-			tSide = "RIGHT"
+		color := "BLUE"
+		if t.IsResolved {
+			color = "GRAY"
 		}
-		if t.Line == no && tSide == side {
-			if t.IsResolved {
-				return "GRAY", true
-			}
-			return "BLUE", true
+		side := t.DiffSide
+		if side == "" {
+			side = "RIGHT"
+		}
+		add(color, side, t.Line, side, t.StartLine, false)
+	}
+	for _, d := range m.pending() {
+		if d.Path == f.Filename {
+			add("YELLOW", d.Side, d.Line, d.StartSide, d.StartLine, true)
 		}
 	}
-	return "", false
+	return marks
 }
 
 // itemRows returns, for each line, its rows and the rows of its blocks.
@@ -374,6 +421,7 @@ func (m *Model) renderDiff() string {
 		return fmt.Sprintf("%4d", n)
 	}
 
+	marks := m.marks(f)
 	var out []string
 	row := 0
 	for i := 0; i < len(f.lines) && len(out) < height; i++ {
@@ -445,9 +493,14 @@ func (m *Model) renderDiff() string {
 				gutter = strings.Repeat(" ", gutterWidth-1) + "⋯"
 			}
 			var line string
-			if colorName, ok := m.commentMark(f, i); ok && r == 0 {
-				// A dot in the gutter flags the lines carrying comments.
-				line = gutterStyle.Foreground(m.gh(colorName)).Bold(true).Render("●") +
+			if mk, ok := marks[i]; ok {
+				// The gutter flags the commented lines: a bar along the range,
+				// a dot on the line the comments are under.
+				sym := "│"
+				if mk.end && r == 0 {
+					sym = "●"
+				}
+				line = gutterStyle.Foreground(m.gh(mk.color)).Bold(true).Render(sym) +
 					gutterStyle.Render(gutter[1:]) + style.Width(avail).Render(part)
 			} else {
 				line = gutterStyle.Render(gutter) + style.Width(avail).Render(part)
