@@ -5,7 +5,6 @@ package reviewview
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -61,6 +60,7 @@ type Model struct {
 	err     error
 	prId    string
 	files   []fileDiff
+	tree    []treeRow
 	threads map[string][]data.PRReviewThread
 
 	fileIdx  int
@@ -191,7 +191,7 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		for _, f := range msg.files {
 			m.files = append(m.files, newFileDiff(f))
 		}
-		sort.SliceStable(m.files, func(i, j int) bool { return m.files[i].Filename < m.files[j].Filename })
+		m.orderFilesLikeTree()
 		// Start on the first changed line.
 		for i, l := range m.files0Lines() {
 			if l.kind == lineAdd || l.kind == lineDel {

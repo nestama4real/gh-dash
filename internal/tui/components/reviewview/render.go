@@ -3,7 +3,6 @@ package reviewview
 import (
 	"fmt"
 	"image/color"
-	"path"
 	"strconv"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
 	"github.com/dlvhdr/gh-dash/v4/internal/utils"
 )
 
@@ -29,7 +29,7 @@ func (m *Model) treeWidth() int {
 	if !m.showTree || m.width < 100 {
 		return 0
 	}
-	return min(42, m.width/4)
+	return min(48, max(30, m.width/4))
 }
 
 func (m *Model) diffWidth() int {
@@ -141,46 +141,83 @@ func plural(n int) string {
 	return "s"
 }
 
+// File tree icons (Nerd Font octicons).
+const (
+	iconFolder   = "\uf413" // nf-oct-file_directory
+	iconChevron  = "\uf47c" // nf-oct-chevron_down
+	iconModified = "\uf459" // nf-oct-diff_modified
+	iconAdded    = "\uf457" // nf-oct-diff_added
+	iconRemoved  = "\uf458" // nf-oct-diff_removed
+	iconRenamed  = "\uf45a" // nf-oct-diff_renamed
+)
+
 func (m *Model) renderTree(width int) string {
 	theme := m.ctx.Theme
 	height := m.diffHeight()
-	start := 0
-	if m.fileIdx >= height {
-		start = m.fileIdx - height + 1
-	}
-	pendingPerFile := map[string]int{}
+	faint := lipgloss.NewStyle().Foreground(theme.FaintText)
+
+	comments := map[string]int{}
 	for _, d := range m.pending() {
-		pendingPerFile[d.Path]++
+		comments[d.Path]++
 	}
+	for path, threads := range m.threads {
+		comments[path] += len(threads)
+	}
+
+	// Keep the current file in view.
+	cur := 0
+	for i, r := range m.tree {
+		if r.file == m.fileIdx {
+			cur = i
+		}
+	}
+	start := 0
+	if cur >= height {
+		start = cur - height + 1
+	}
+
 	lines := make([]string, 0, height)
-	for i := start; i < len(m.files) && len(lines) < height; i++ {
-		f := m.files[i]
-		var mark string
+	for i := start; i < len(m.tree) && len(lines) < height; i++ {
+		r := m.tree[i]
+		indent := strings.Repeat("  ", r.depth)
+		var row string
+		if r.file < 0 {
+			row = " " + indent + faint.Render(iconChevron+" ") +
+				lipgloss.NewStyle().Foreground(m.gh("BLUE")).Render(iconFolder) + " " +
+				lipgloss.NewStyle().Foreground(theme.SecondaryText).Render(r.name)
+			lines = append(lines, ansi.Truncate(row, width, "…")+
+				strings.Repeat(" ", max(0, width-ansi.StringWidth(row))))
+			continue
+		}
+
+		f := m.files[r.file]
+		icon, color := iconModified, "YELLOW"
 		switch f.Status {
 		case "added":
-			mark = lipgloss.NewStyle().Foreground(m.gh("GREEN")).Render("A")
+			icon, color = iconAdded, "GREEN"
 		case "removed":
-			mark = lipgloss.NewStyle().Foreground(m.gh("RED")).Render("D")
+			icon, color = iconRemoved, "RED"
 		case "renamed":
-			mark = lipgloss.NewStyle().Foreground(m.gh("BLUE")).Render("R")
-		default:
-			mark = lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Render("M")
+			icon, color = iconRenamed, "BLUE"
 		}
-		extra := ""
-		if n := pendingPerFile[f.Filename]; n > 0 {
-			extra = lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Render(fmt.Sprintf(" ●%d", n))
+		count := ""
+		if n := comments[f.Filename]; n > 0 {
+			count = " " + constants.CommentIcon + " " + fmt.Sprint(n)
 		}
-		dir, base := path.Split(f.Filename)
-		nameW := max(4, width-3-ansi.StringWidth(extra))
-		name := base
-		if room := nameW - ansi.StringWidth(base) - 1; room > 4 && dir != "" {
-			name = lipgloss.NewStyle().Foreground(theme.FaintText).
-				Render(ansi.TruncateLeft(dir, max(0, ansi.StringWidth(dir)-room), "…")) + base
+		selected := r.file == m.fileIdx
+		nameStyle := lipgloss.NewStyle().Foreground(theme.PrimaryText)
+		if selected {
+			nameStyle = nameStyle.Bold(true)
 		}
-		row := " " + mark + " " + ansi.Truncate(name, nameW, "…") + extra
+		prefix := " " + indent + "  " + lipgloss.NewStyle().Foreground(m.gh(color)).Render(icon) + " "
+		room := max(4, width-ansi.StringWidth(prefix)-ansi.StringWidth(count)-1)
+		name := nameStyle.Render(ansi.Truncate(r.name, room, "…"))
+		row = prefix + name
+		pad := max(1, width-ansi.StringWidth(row)-ansi.StringWidth(count))
+		row += strings.Repeat(" ", pad) + faint.Render(count)
 		style := lipgloss.NewStyle().Width(width).MaxWidth(width)
-		if i == m.fileIdx {
-			style = style.Background(theme.SelectedBackground).Bold(true)
+		if selected {
+			style = style.Background(theme.SelectedBackground)
 		}
 		lines = append(lines, style.Render(row))
 	}

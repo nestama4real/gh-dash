@@ -151,3 +151,34 @@ func TestCollapse(t *testing.T) {
 		t.Errorf("collapseAll: %d lines", len(f.lines))
 	}
 }
+
+func TestBuildTree(t *testing.T) {
+	rows := buildTree([]string{
+		"app/src/main/java/com/android/shifter/ui/theme/Theme.kt",
+		"app/src/main/AndroidManifest.xml",
+		"app/src/main/java/com/android/shifter/MainActivity.kt",
+		"app/src/main/java/com/android/shifter/ui/components/ShifterTopBar.kt",
+		"app/src/test/java/com/android/shifter/ui/theme/EdgeToEdgeTest.kt",
+	})
+	var got []string
+	for _, r := range rows {
+		got = append(got, fmt.Sprintf("%d:%s", r.depth, r.name))
+	}
+	want := []string{
+		"0:app/src",
+		"1:main",
+		"2:java/com/android/shifter",
+		"3:ui",
+		"4:components",
+		"5:ShifterTopBar.kt",
+		"4:theme",
+		"5:Theme.kt",
+		"3:MainActivity.kt",
+		"2:AndroidManifest.xml",
+		"1:test/java/com/android/shifter/ui/theme",
+		"2:EdgeToEdgeTest.kt",
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("tree:\n got %v\nwant %v", got, want)
+	}
+}
