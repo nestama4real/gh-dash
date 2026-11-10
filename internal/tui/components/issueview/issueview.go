@@ -220,7 +220,6 @@ func (m *Model) renderBody() string {
 	width := m.getIndentedContentWidth()
 	// Strip HTML comments from body and cleanup body.
 	body := htmlCommentRegex.ReplaceAllString(m.issue.Data.Body, "")
-	body = lineCleanupRegex.ReplaceAllString(body, "")
 
 	body = strings.TrimSpace(body)
 	if body == "" {
@@ -231,7 +230,7 @@ func (m *Model) renderBody() string {
 	}
 
 	markdownRenderer := markdown.GetMarkdownRenderer(width, m.ctx)
-	rendered, err := images.RenderMarkdown(&markdownRenderer, body, width)
+	rendered, err := images.RenderMarkdown(&markdownRenderer, body, width, cleanupLines)
 	if err != nil {
 		return ""
 	}
@@ -446,4 +445,10 @@ func (m *Model) repoRef() cmpcontroller.RepoRef {
 
 func (m *Model) hasData() bool {
 	return m.issue != nil
+}
+
+// cleanupLines removes the lines the markdown renderer handles poorly
+// (tables). Tables of images are kept: they are shown as galleries.
+func cleanupLines(body string) string {
+	return lineCleanupRegex.ReplaceAllString(body, "")
 }

@@ -141,8 +141,7 @@ func (m *Model) renderComment(
 		header = authorAndTime
 	}
 
-	body := lineCleanupRegex.ReplaceAllString(comment.Body, "")
-	body, err := images.RenderMarkdown(&markdownRenderer, body, width)
+	body, err := images.RenderMarkdown(&markdownRenderer, comment.Body, width, cleanupLines)
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,

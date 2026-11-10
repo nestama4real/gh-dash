@@ -498,7 +498,6 @@ func (m *Model) renderSummary() string {
 	width := m.getIndentedContentWidth()
 	// Strip HTML comments from body and cleanup body.
 	body := htmlCommentRegex.ReplaceAllString(m.pr.Data.Enriched.Body, "")
-	body = lineCleanupRegex.ReplaceAllString(body, "")
 
 	desc := m.ctx.Styles.Common.MainTextStyle.Bold(true).Underline(true).Render(" Summary")
 	title := lipgloss.JoinVertical(
@@ -517,7 +516,7 @@ func (m *Model) renderSummary() string {
 	}
 
 	markdownRenderer := markdown.GetMarkdownRenderer(width, m.ctx)
-	rendered, err := images.RenderMarkdown(&markdownRenderer, body, width)
+	rendered, err := images.RenderMarkdown(&markdownRenderer, body, width, cleanupLines)
 	if err != nil {
 		return ""
 	}
@@ -825,4 +824,10 @@ func (m *Model) repoRef() cmpcontroller.RepoRef {
 
 func (m *Model) hasData() bool {
 	return m.pr != nil && m.pr.Data != nil
+}
+
+// cleanupLines removes the lines the markdown renderer handles poorly
+// (tables). Tables of images are kept: they are shown as galleries.
+func cleanupLines(body string) string {
+	return lineCleanupRegex.ReplaceAllString(body, "")
 }

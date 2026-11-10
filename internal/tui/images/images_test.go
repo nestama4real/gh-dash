@@ -26,12 +26,12 @@ func TestFindImages(t *testing.T) {
 }
 
 func TestReplaceMarkers(t *testing.T) {
-	prepared, refs := extract("a ![x](u) b")
+	prepared, refs, _ := extract("a ![x](u) b")
 	if len(refs) != 1 || !strings.Contains(prepared, "GHDASHIMG0X") {
 		t.Fatalf("bad extraction: %q %+v", prepared, refs)
 	}
 	rendered := "  a\n\n  \x1b[1mGHDASHIMG0X\x1b[0m\n\n  b"
-	out := replaceMarkers(rendered, func(int) []string { return []string{"L1", "L2"} })
+	out := replaceMarkers(rendered, func(string, int, int) []string { return []string{"L1", "L2"} }, 80)
 	if out != "  a\n\n  L1\n  L2\n\n  b" {
 		t.Errorf("got %q", out)
 	}
@@ -53,5 +53,34 @@ func TestFit(t *testing.T) {
 	cols, rows = fit(cw*5, ch*3, 80, 20)
 	if cols != 5 || rows != 3 {
 		t.Errorf("small: %dx%d", cols, rows)
+	}
+}
+
+func TestGallery(t *testing.T) {
+	body := "Organizer:\n\n| Overview | People |\n|---|---|\n" +
+		`| <img alt="a" src="https://x/a"> | <img alt="b" src="https://x/b"> |` +
+		"\n\nAfter"
+	prepared, refs, galleries := extract(body)
+	if len(refs) != 0 || len(galleries) != 1 {
+		t.Fatalf("refs %v galleries %v", refs, galleries)
+	}
+	if !strings.Contains(prepared, "GHDASHGAL0X") || strings.Contains(prepared, "| Overview") {
+		t.Fatalf("table not replaced: %q", prepared)
+	}
+	g := galleries[0]
+	if len(g.headers) != 2 || len(g.rows) != 1 || g.rows[0][1].refs[0].Url != "https://x/b" {
+		t.Fatalf("bad gallery %+v", g)
+	}
+	lines := renderGallery(g, 30, func(r Ref, w int) []string {
+		return []string{strings.Repeat("#", w), strings.Repeat(r.Alt, w)}
+	})
+	if len(lines) != 3 {
+		t.Fatalf("lines %q", lines)
+	}
+	if got := lines[1]; got != strings.Repeat("#", 14)+"  "+strings.Repeat("#", 14) {
+		t.Errorf("row %q", got)
+	}
+	if n := len(FindImages(body)); n != 2 {
+		t.Errorf("FindImages: %d", n)
 	}
 }
