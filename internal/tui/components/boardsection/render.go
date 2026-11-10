@@ -191,7 +191,7 @@ func (m *Model) renderCards(c *column, selected bool, width, height int) string 
 	rendered := make([]string, len(c.items))
 	heights := make([]int, len(c.items))
 	for i, it := range c.items {
-		rendered[i] = m.renderCard(it, selected && i == sel, width)
+		rendered[i] = m.cachedCard(it, selected && i == sel, width)
 		heights[i] = lipgloss.Height(rendered[i])
 	}
 
@@ -240,6 +240,22 @@ func (m *Model) renderCards(c *column, selected bool, width, height int) string 
 	}
 	return lipgloss.NewStyle().MaxHeight(height).
 		Render(lipgloss.JoinVertical(lipgloss.Left, out...))
+}
+
+// cachedCard renders a card, reusing it while the board and the width do
+// not change.
+func (m *Model) cachedCard(it *data.ProjectItem, selected bool, width int) string {
+	key := fmt.Sprintf("%p|%d|%d|%v", m.store.Project, m.store.Version, width, m.Ctx.HasDarkBackground)
+	if key != m.cardKey || m.cardCache == nil {
+		m.cardCache, m.cardKey = map[string]string{}, key
+	}
+	ck := fmt.Sprintf("%s|%v", it.Id, selected)
+	if c, ok := m.cardCache[ck]; ok {
+		return c
+	}
+	c := m.renderCard(it, selected, width)
+	m.cardCache[ck] = c
+	return c
 }
 
 func (m *Model) renderCard(it *data.ProjectItem, selected bool, width int) string {

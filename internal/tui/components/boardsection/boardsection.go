@@ -44,6 +44,8 @@ type Store struct {
 	lastTaskId  string
 	staging     *data.ProjectData
 	cacheLoaded bool
+	// Version changes whenever the project or one of its items changes.
+	Version int
 }
 
 func NewStore() *Store {
@@ -64,6 +66,7 @@ func (s *Store) LoadCache(cfg *config.Config) {
 
 // Reindex publishes the project to the other views (issue rows, PR filters).
 func (s *Store) Reindex(cfg *config.Config) {
+	s.Version++
 	data.SetProjectIndex(s.Project, cfg.ScrumBoard.GetStatusField())
 }
 
@@ -91,6 +94,13 @@ type Model struct {
 	follow    string // item id to select on next rebuild
 
 	editor *fieldEditor
+
+	// What the columns were built from, to rebuild them only when needed,
+	// and the rendered cards: rendering them on every key made held arrow
+	// keys lag.
+	builtKey  string
+	cardCache map[string]string
+	cardKey   string
 }
 
 func NewModel(
@@ -262,6 +272,7 @@ func (s *Store) HandleFetched(ctx *context.ProgramContext, sectionId int, msg Bo
 	if s.Project == nil {
 		s.Project = s.staging
 	}
+	s.Version++
 	if msg.Next != nil {
 		return fetchPage(ctx, msg.TaskId, sectionId, msg.Next)
 	}
@@ -290,11 +301,22 @@ func (m *Model) statusField() (data.ProjectField, bool) {
 
 // rebuild recomputes the columns from the store and the current filter.
 func (m *Model) rebuild() {
-	m.columns = nil
 	project := m.store.Project
 	if project == nil {
+		m.columns, m.builtKey = nil, ""
 		return
 	}
+	key := fmt.Sprintf("%p|%d|%s|%v|%s", project, m.store.Version, m.SearchValue,
+		m.store.ShowOldDone, m.Ctx.User)
+	if key == m.builtKey && m.follow == "" {
+		m.selCol = clamp(m.selCol, 0, len(m.columns)-1)
+		if c := m.currColumn(); c != nil {
+			m.selRow[c.key] = clamp(m.selRow[c.key], 0, len(c.items)-1)
+		}
+		return
+	}
+	m.builtKey = key
+	m.columns = nil
 	statusField, hasStatus := m.statusField()
 	fc := newFilterContext(project, m.Ctx.User)
 
@@ -680,6 +702,7 @@ func (m *Model) applyIssueUpdate(msg tasks.UpdateIssueMsg) {
 	if m.store.Project == nil {
 		return
 	}
+	defer m.store.Reindex(m.Ctx.Config)
 	for i := range m.store.Project.Items {
 		item := &m.store.Project.Items[i]
 		if item.ContentType != "Issue" || item.Content.Number != msg.IssueNumber {

@@ -78,6 +78,7 @@ type Model struct {
 	previewBeforeBoard bool
 	mode               Mode
 	imagePopup         *imagePopup
+	rowChangeSeq       int
 	review             *reviewview.Model
 }
 
@@ -326,19 +327,19 @@ func (m *Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.ctx.View != config.RepoView {
 					cmds = append(cmds, currSection.FetchNextPageSectionRows()...)
 				}
-				cmd = m.onViewedRowChanged()
+				cmd = m.onViewedRowChangedSoon()
 			}
 
 		case key.Matches(msg, m.keys.Up):
 			if currSection != nil {
 				currSection.PrevRow()
-				cmd = m.onViewedRowChanged()
+				cmd = m.onViewedRowChangedSoon()
 			}
 
 		case key.Matches(msg, m.keys.FirstLine):
 			if currSection != nil {
 				currSection.FirstItem()
-				cmd = m.onViewedRowChanged()
+				cmd = m.onViewedRowChangedSoon()
 			}
 
 		case key.Matches(msg, m.keys.LastLine):
@@ -347,7 +348,7 @@ func (m *Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, currSection.FetchNextPageSectionRows()...)
 				}
 				currSection.LastItem()
-				cmd = m.onViewedRowChanged()
+				cmd = m.onViewedRowChangedSoon()
 			}
 
 		case key.Matches(msg, m.keys.TogglePreview):
@@ -930,6 +931,11 @@ func (m *Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.onViewedRowChanged())
 		}
 
+	case viewedRowSettledMsg:
+		if msg.seq == m.rowChangeSeq {
+			cmds = append(cmds, m.onViewedRowChanged())
+		}
+
 	case images.LoadedMsg:
 		cmds = append(cmds, m.syncSidebar())
 		m.renderImagePopup()
@@ -1175,6 +1181,19 @@ func (m *Model) markNotificationAsRead(notificationId string) {
 		Unread: false,
 	}
 	m.updateNotificationSections(readStateMsg)
+}
+
+type viewedRowSettledMsg struct{ seq int }
+
+// onViewedRowChangedSoon updates the preview once the selection stops
+// moving. Rendering the preview (markdown, images) and enriching PRs on
+// every key made held arrow keys pile up and keep scrolling after release.
+func (m *Model) onViewedRowChangedSoon() tea.Cmd {
+	m.rowChangeSeq++
+	seq := m.rowChangeSeq
+	return tea.Tick(50*time.Millisecond, func(time.Time) tea.Msg {
+		return viewedRowSettledMsg{seq: seq}
+	})
 }
 
 func (m *Model) onViewedRowChanged() tea.Cmd {

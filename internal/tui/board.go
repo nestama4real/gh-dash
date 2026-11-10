@@ -118,11 +118,11 @@ func (m *Model) handleBoardKey(
 	switch {
 	case key.Matches(msg, keys.BoardKeys.PrevColumn):
 		board.PrevColumn()
-		return m.onViewedRowChanged(), true
+		return m.onViewedRowChangedSoon(), true
 
 	case key.Matches(msg, keys.BoardKeys.NextColumn):
 		board.NextColumn()
-		return m.onViewedRowChanged(), true
+		return m.onViewedRowChangedSoon(), true
 
 	case key.Matches(msg, keys.BoardKeys.MoveLeft):
 		cmd := board.MoveCard(-1)

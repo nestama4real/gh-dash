@@ -27,6 +27,13 @@ type Model struct {
 	dimensions     constants.Dimensions
 	rowsViewport   listviewport.Model
 	ContentHeight  int // Optional: override content height (0 = use default from config)
+
+	// Rendered rows, reused while the rows, the layout and the styles do
+	// not change: only the rows whose selection changed are rendered again.
+	// Rendering every row on every update made held arrow keys lag.
+	rendered    []string
+	renderedKey string
+	renderedSel int
 }
 
 type Column struct {
@@ -168,14 +175,45 @@ func (m *Model) cacheColumnWidths() {
 func (m *Model) SyncViewPortContent() {
 	headerColumns := m.renderHeaderColumns()
 	m.cacheColumnWidths()
-	renderedRows := make([]string, 0, len(m.Rows))
-	for i := range m.Rows {
-		renderedRows = append(renderedRows, m.renderRow(i, headerColumns))
+
+	key := m.renderKey(headerColumns)
+	sel := m.rowsViewport.GetCurrItem()
+	if key == m.renderedKey && len(m.rendered) == len(m.Rows) {
+		if sel == m.renderedSel {
+			return
+		}
+		for _, i := range []int{m.renderedSel, sel} {
+			if i >= 0 && i < len(m.Rows) {
+				m.rendered[i] = m.renderRow(i, headerColumns)
+			}
+		}
+	} else {
+		m.rendered = make([]string, 0, len(m.Rows))
+		for i := range m.Rows {
+			m.rendered = append(m.rendered, m.renderRow(i, headerColumns))
+		}
 	}
+	m.renderedKey, m.renderedSel = key, sel
 
 	m.rowsViewport.SyncViewPort(
-		lipgloss.JoinVertical(lipgloss.Left, renderedRows...),
+		lipgloss.JoinVertical(lipgloss.Left, m.rendered...),
 	)
+}
+
+// renderKey identifies what the rendered rows depend on, besides the
+// selection: the rows themselves, the column widths and the styles.
+func (m *Model) renderKey(headerColumns []string) string {
+	var b strings.Builder
+	if len(m.Rows) > 0 {
+		fmt.Fprintf(&b, "%p", &m.Rows[0])
+	}
+	fmt.Fprintf(&b, "|%d|%d|%d|%v|%v|%v", len(m.Rows), m.dimensions.Width, m.ContentHeight,
+		m.ctx.Config.Theme.Ui.Table.Compact, m.ctx.HasDarkBackground,
+		m.ctx.Styles.Table.CellStyle.GetForeground())
+	for _, h := range headerColumns {
+		fmt.Fprintf(&b, "|%d", lipgloss.Width(h))
+	}
+	return b.String()
 }
 
 func (m *Model) SetRows(rows []Row) {
