@@ -5,8 +5,8 @@ import (
 )
 
 // BoardKeyMap holds the keys specific to the scrum board view. Everything
-// else (j/k, h/l for tabs, o, p, r, /, y, issue actions...) is shared with
-// the other views.
+// else (j/k, tab/shift+tab for tabs, o, p, r, /, y, issue actions...) is
+// shared with the other views.
 type BoardKeyMap struct {
 	PrevColumn    key.Binding
 	NextColumn    key.Binding
@@ -22,12 +22,12 @@ type BoardKeyMap struct {
 
 var BoardKeys = BoardKeyMap{
 	PrevColumn: key.NewBinding(
-		key.WithKeys("[", "shift+tab"),
-		key.WithHelp("[", "previous column"),
+		key.WithKeys("left", "h", "["),
+		key.WithHelp("←/h/[", "previous column"),
 	),
 	NextColumn: key.NewBinding(
-		key.WithKeys("]", "tab"),
-		key.WithHelp("]", "next column"),
+		key.WithKeys("right", "l", "]"),
+		key.WithHelp("→/l/]", "next column"),
 	),
 	MoveLeft: key.NewBinding(
 		key.WithKeys("<", "shift+left"),

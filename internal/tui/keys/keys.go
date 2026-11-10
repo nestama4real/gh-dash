@@ -203,13 +203,15 @@ var Keys = &KeyMap{
 		key.WithKeys("U"),
 		key.WithHelp("U", "preview line up"),
 	),
+	// Tabs switch sections, leaving the arrows to each view: the preview's
+	// tabs for PRs, the columns for the scrum board.
 	NextSection: key.NewBinding(
-		key.WithKeys("right", "l"),
-		key.WithHelp("󰁔/l", "next section"),
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "next section"),
 	),
 	PrevSection: key.NewBinding(
-		key.WithKeys("left", "h"),
-		key.WithHelp("󰁍/h", "previous section"),
+		key.WithKeys("shift+tab"),
+		key.WithHelp("shift+tab", "previous section"),
 	),
 	Search: key.NewBinding(
 		key.WithKeys("/"),
