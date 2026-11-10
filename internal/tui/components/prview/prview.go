@@ -21,6 +21,7 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tasks"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/images"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/keys"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/markdown"
 	"github.com/dlvhdr/gh-dash/v4/internal/utils"
@@ -516,7 +517,7 @@ func (m *Model) renderSummary() string {
 	}
 
 	markdownRenderer := markdown.GetMarkdownRenderer(width, m.ctx)
-	rendered, err := markdownRenderer.Render(body)
+	rendered, err := images.RenderMarkdown(&markdownRenderer, body, width)
 	if err != nil {
 		return ""
 	}

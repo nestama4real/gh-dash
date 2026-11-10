@@ -610,6 +610,15 @@ func (m *Model) Update(msg tea.Msg) (section.Section, tea.Cmd) {
 				m.terms = parseFilter(m.SearchValue)
 				m.SetIsSearching(false)
 				m.rebuild()
+				// Land on the first column that still has cards.
+				if c := m.currColumn(); c == nil || len(c.items) == 0 {
+					for i, col := range m.columns {
+						if len(col.items) > 0 && !col.collapsed {
+							m.selCol = i
+							break
+						}
+					}
+				}
 				return m, nil
 			}
 			break

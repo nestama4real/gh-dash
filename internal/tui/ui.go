@@ -46,6 +46,7 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tasks"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/images"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/keys"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/markdown"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/theme"
@@ -195,6 +196,13 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := m.update(msg)
+	// Rendering may have requested images or queued escape sequences for
+	// them, whatever path the update took.
+	return model, tea.Batch(cmd, images.Flush())
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		cmd             tea.Cmd
 		tabsCmd         tea.Cmd
@@ -381,6 +389,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmd = m.notify(fmt.Sprintf("Copied %s to clipboard", number))
 			}
 			return m, cmd
+
+		case key.Matches(msg, m.keys.ViewImages):
+			return m, m.viewImages(currRowData)
 
 		case key.Matches(msg, m.keys.CopyUrl):
 			var cmd tea.Cmd
@@ -718,6 +729,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ctx.RepoUrl = msg.RepoUrl
 		m.ctx.Theme = theme.ParseTheme(m.ctx.Config)
 		m.ctx.Styles = context.InitStyles(m.ctx.Theme)
+		images.Configure(images.Config{
+			Enabled:   m.ctx.Config.Images.IsEnabled(),
+			MaxWidth:  m.ctx.Config.Images.MaxWidth,
+			MaxHeight: m.ctx.Config.Images.MaxHeight,
+		}, lipgloss.NewStyle().Foreground(m.ctx.Theme.FaintText).Italic(true))
 		m.taskSpinner.Style = lipgloss.NewStyle().
 			Background(m.ctx.Theme.SelectedBackground)
 
@@ -881,6 +897,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Id == m.currSectionId {
 			cmds = append(cmds, m.onViewedRowChanged())
 		}
+
+	case images.LoadedMsg:
+		cmds = append(cmds, m.syncSidebar())
+
+	case imagesViewerClosedMsg:
+		// The terminal was handed over: send the images again.
+		images.Invalidate()
+		cmds = append(cmds, m.syncSidebar())
 
 	case execProcessFinishedMsg, tea.FocusMsg:
 		if currSection != nil {

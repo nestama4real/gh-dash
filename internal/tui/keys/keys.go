@@ -46,6 +46,7 @@ type KeyMap struct {
 	Search                key.Binding
 	CopyUrl               key.Binding
 	CopyNumber            key.Binding
+	ViewImages            key.Binding
 	SectionMode           key.Binding
 	NewSection            key.Binding
 	RemoveSection         key.Binding
@@ -134,6 +135,7 @@ func (k KeyMap) AppKeys() []key.Binding {
 		k.OpenGithub,
 		k.CopyNumber,
 		k.CopyUrl,
+		k.ViewImages,
 		k.Search,
 		k.NewSection,
 		k.RemoveSection,
@@ -204,6 +206,10 @@ var Keys = &KeyMap{
 	CopyNumber: key.NewBinding(
 		key.WithKeys("y"),
 		key.WithHelp("y", "copy number"),
+	),
+	ViewImages: key.NewBinding(
+		key.WithKeys("i"),
+		key.WithHelp("i", "view images full screen"),
 	),
 	SectionMode: key.NewBinding(
 		key.WithKeys("ctrl+s"),
@@ -336,6 +342,8 @@ func rebindUniversal(universal []config.Keybinding) error {
 			key = &Keys.CopyUrl
 		case "copyNumber":
 			key = &Keys.CopyNumber
+		case "viewImages":
+			key = &Keys.ViewImages
 		case "newSection":
 			key = &Keys.NewSection
 		case "help":

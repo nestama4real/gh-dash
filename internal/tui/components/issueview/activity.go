@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/images"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/markdown"
 	"github.com/dlvhdr/gh-dash/v4/internal/utils"
 )
@@ -82,7 +83,7 @@ func (m *Model) renderComment(
 		))
 
 	body := lineCleanupRegex.ReplaceAllString(comment.Body, "")
-	body, err := markdownRenderer.Render(body)
+	body, err := images.RenderMarkdown(&markdownRenderer, body, width)
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,

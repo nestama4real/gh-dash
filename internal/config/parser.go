@@ -393,6 +393,19 @@ type Config struct {
 	IncludeReadNotifications bool                         `yaml:"includeReadNotifications"                       default:"true"`
 	ScrumBoard               *ScrumBoardConfig            `yaml:"scrumBoard,omitempty"`
 	HideNotifications        bool                         `yaml:"hideNotifications,omitempty"`
+	Images                   ImagesConfig                 `yaml:"images,omitempty"`
+}
+
+// ImagesConfig controls the images shown inline in descriptions and
+// comments (kitty-compatible terminals only). Sizes are in terminal cells.
+type ImagesConfig struct {
+	Enabled   *bool `yaml:"enabled,omitempty"`
+	MaxWidth  int   `yaml:"maxWidth,omitempty"`
+	MaxHeight int   `yaml:"maxHeight,omitempty"`
+}
+
+func (c ImagesConfig) IsEnabled() bool {
+	return c.Enabled == nil || *c.Enabled
 }
 
 func (cfg *Config) HasScrumBoard() bool {
