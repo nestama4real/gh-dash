@@ -29,6 +29,9 @@ type UpdatePRMsg struct {
 	AddedAssignees   *data.Assignees
 	RemovedAssignees *data.Assignees
 	Labels           *data.PRLabels
+	// RequestedReviewers is set once reviews have been requested; the PR
+	// is then fetched again to show them.
+	RequestedReviewers []string
 }
 
 type UpdateBranchMsg struct {
@@ -300,6 +303,37 @@ func AssignPR(
 			return UpdatePRMsg{
 				PrNumber:       prNumber,
 				AddedAssignees: &returnedAssignees,
+			}
+		},
+	})
+}
+
+func RequestPRReview(
+	ctx *context.ProgramContext,
+	section SectionIdentifier,
+	pr data.RowData,
+	usernames []string,
+) tea.Cmd {
+	prNumber := pr.GetNumber()
+	args := []string{
+		"pr",
+		"edit",
+		fmt.Sprint(prNumber),
+		"-R",
+		pr.GetRepoNameWithOwner(),
+		"--add-reviewer",
+		strings.Join(usernames, ","),
+	}
+	return fireTask(ctx, GitHubTask{
+		Id:           buildTaskId("pr_request_review", prNumber),
+		Args:         args,
+		Section:      section,
+		StartText:    fmt.Sprintf("Requesting reviews on pr #%d from %s", prNumber, usernames),
+		FinishedText: fmt.Sprintf("Reviews on pr #%d requested from %s", prNumber, usernames),
+		Msg: func(c *exec.Cmd, err error) tea.Msg {
+			return UpdatePRMsg{
+				PrNumber:           prNumber,
+				RequestedReviewers: usernames,
 			}
 		},
 	})

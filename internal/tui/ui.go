@@ -470,6 +470,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case key.Matches(msg, keys.PRKeys.Assign):
 				return m, m.openSidebarForPRInput(m.prView.SetIsAssigning)
 
+			case key.Matches(msg, keys.PRKeys.RequestReview):
+				return m, m.openSidebarForPRInput(m.prView.SetIsRequestingReview)
+
 			case key.Matches(msg, keys.PRKeys.Unassign):
 				return m, m.openSidebarForPRInput(m.prView.SetIsUnassigning)
 
@@ -811,6 +814,10 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				scmd = m.updateSection(msg.SectionId, msg.SectionType, msg.Msg)
 			}
 			cmds = append(cmds, scmd)
+			if upd, ok := msg.Msg.(tasks.UpdatePRMsg); ok && msg.Err == nil &&
+				len(upd.RequestedReviewers) > 0 {
+				cmds = append(cmds, m.prView.RefetchCurrRow())
+			}
 
 			syncCmd := m.syncSidebar()
 			cmds = append(cmds, syncCmd)

@@ -28,6 +28,7 @@ const (
 	ModeUnassign
 	ModeLabel
 	ModeSearch
+	ModeRequestReview
 )
 
 type FetchPolicy int
@@ -372,7 +373,7 @@ func (c *Controller) resetAutocompleteState() {
 
 func (c Controller) usesAutocomplete() bool {
 	switch c.mode {
-	case ModeComment, ModeApprove, ModeAssign, ModeLabel, ModeSearch:
+	case ModeComment, ModeApprove, ModeAssign, ModeLabel, ModeSearch, ModeRequestReview:
 		return true
 	default:
 		return false

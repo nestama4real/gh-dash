@@ -96,6 +96,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case cmpcontroller.ModeRequestReview:
+			usernames := fuzzyselect.AllWords(value)
+			for i, u := range usernames {
+				usernames[i] = strings.TrimPrefix(u, "@")
+			}
+			if len(usernames) > 0 {
+				return m, tasks.RequestPRReview(m.ctx, sid, m.pr.Data.Primary, usernames)
+			}
+			return m, nil
+
 		case cmpcontroller.ModeUnassign:
 			usernames := fuzzyselect.AllWords(value)
 			if len(usernames) > 0 {
@@ -714,6 +724,47 @@ func (m *Model) userAssignedToPr(login string) bool {
 		}
 	}
 	return false
+}
+
+func (m *Model) GetIsRequestingReview() bool {
+	return m.editor.Mode() == cmpcontroller.ModeRequestReview
+}
+
+func (m *Model) SetIsRequestingReview(isRequesting bool) tea.Cmd {
+	if m.pr == nil {
+		return nil
+	}
+
+	if !isRequesting {
+		if m.editor.Mode() == cmpcontroller.ModeRequestReview {
+			m.editor.Exit()
+		}
+		return nil
+	}
+
+	m.editor.SetAutocompleteSource(&fuzzyselect.UserMentionSource{WithAtSymbol: false})
+	cmd := m.editor.Enter(cmpcontroller.EnterOptions{
+		Mode:                             cmpcontroller.ModeRequestReview,
+		Prompt:                           constants.ReviewPrompt,
+		Repo:                             m.repoRef(),
+		EnterFetch:                       cmpcontroller.FetchSilent,
+		HideAutocompleteWhenContextEmpty: false,
+	})
+	m.editor.ShowCompletions()
+	return cmd
+}
+
+// RefetchCurrRow fetches the selected PR again, e.g. to show the reviewers
+// just requested.
+func (m *Model) RefetchCurrRow() tea.Cmd {
+	if m == nil || m.pr == nil {
+		return nil
+	}
+	url, sectionId := m.pr.Data.Primary.Url, m.sectionId
+	return func() tea.Msg {
+		d, err := data.FetchPullRequest(url)
+		return EnrichedPrMsg{Id: sectionId, Type: prssection.SectionType, Data: d, Err: err}
+	}
 }
 
 func (m *Model) GetIsUnassigning() bool {
