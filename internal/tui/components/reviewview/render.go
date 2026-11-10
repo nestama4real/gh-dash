@@ -322,10 +322,9 @@ func (m *Model) renderThread(t data.PRReviewThread, width int) string {
 		colorName = "GRAY"
 		tags = append(tags, "✓ Resolved")
 	}
-	header := ""
-	if len(tags) > 0 {
-		header = faint.Render(strings.Join(tags, "  ·  "))
-	}
+	left := faint.Render(strings.Join(tags, "  ·  "))
+	right := faint.Render("r reply")
+	header := left + strings.Repeat(" ", max(1, width-4-ansi.StringWidth(left)-ansi.StringWidth(right))) + right
 	comments := make([][3]string, 0, len(t.Comments))
 	for _, c := range t.Comments {
 		comments = append(comments, [3]string{c.Author, "  " + utils.TimeElapsed(c.CreatedAt), c.Body})
@@ -569,7 +568,7 @@ func (m *Model) renderHint() string {
 	case m.selFrom >= 0:
 		hint = faint.Render("selecting lines: j/k extend • c comment the range • esc cancel")
 	default:
-		hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • x delete • e/z expand/fold • {/} hunk • [/] file • t files • S submit • q back")
+		hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • r reply • x delete • e/z expand/fold • {/} hunk • [/] file • t files • S submit • q back")
 		if f := m.currFile(); f != nil && len(f.lines) > 0 && f.lines[m.currLine()].kind == lineExpanded {
 			hint = faint.Render("unchanged line, not commentable • z fold this block • Z fold all")
 		}
@@ -600,6 +599,27 @@ func (m *Model) renderDialog() string {
 		}
 		return box.Render(bold.Render("Comment on ") + faint.Render(ansi.Truncate(where, m.inputWidth()-12, "…")) +
 			"\n\n" + m.input.View() + "\n\n" + faint.Render("ctrl+s save • esc cancel"))
+
+	case modeReply, modeReplying:
+		f := m.currFile()
+		to := ""
+		if threads := m.threads[f.Filename]; m.replyTo < len(threads) && len(threads[m.replyTo].Comments) > 0 {
+			c := threads[m.replyTo].Comments
+			to = " @" + c[0].Author
+			// Show what is answered: the last comment of the conversation.
+			last := c[len(c)-1]
+			quote := faint.Render(ansi.Truncate("@"+last.Author+": "+
+				strings.Join(strings.Fields(last.Body), " "), m.inputWidth(), "…"))
+			to += "\n\n" + quote
+		}
+		status := faint.Render("ctrl+s send • esc cancel")
+		if m.mode == modeReplying {
+			status = faint.Render("Sending…")
+		} else if m.status != "" {
+			status = lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Render(m.status)
+		}
+		return box.Render(bold.Render("Reply to") + bold.Render(to) +
+			"\n\n" + m.input.View() + "\n\n" + status)
 
 	case modeSubmitChoice:
 		var lines []string

@@ -44,6 +44,7 @@ func FetchPRFiles(repoNameWithOwner string, number int) ([]PRFile, error) {
 
 // PRReviewThread is an existing review conversation on a line of the diff.
 type PRReviewThread struct {
+	Id         string
 	Path       string
 	Line       int
 	StartLine  int
@@ -82,6 +83,7 @@ func FetchPRReviewContext(repoNameWithOwner string, number int) (PRReviewContext
 				HeadRefOid    string
 				ReviewThreads struct {
 					Nodes []struct {
+						Id         string
 						Path       string
 						Line       int
 						StartLine  int
@@ -106,7 +108,7 @@ func FetchPRReviewContext(repoNameWithOwner string, number int) (PRReviewContext
       id headRefOid
       reviewThreads(first: 100) {
         nodes {
-          path line startLine diffSide isOutdated isResolved
+          id path line startLine diffSide isOutdated isResolved
           comments(first: 50) { nodes { author { login } body createdAt } }
         }
       }
@@ -120,7 +122,7 @@ func FetchPRReviewContext(repoNameWithOwner string, number int) (PRReviewContext
 	rc := PRReviewContext{Id: pr.Id, HeadSha: pr.HeadRefOid}
 	for _, t := range pr.ReviewThreads.Nodes {
 		thread := PRReviewThread{
-			Path: t.Path, Line: t.Line, StartLine: t.StartLine, DiffSide: t.DiffSide,
+			Id: t.Id, Path: t.Path, Line: t.Line, StartLine: t.StartLine, DiffSide: t.DiffSide,
 			IsOutdated: t.IsOutdated, IsResolved: t.IsResolved,
 		}
 		for _, c := range t.Comments.Nodes {
@@ -157,6 +159,33 @@ func FetchFileLines(repoNameWithOwner, path, ref string) ([]string, error) {
 	}
 	text := strings.TrimSuffix(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
 	return strings.Split(text, "\n"), nil
+}
+
+// ReplyToReviewThread posts a reply to a review conversation right away.
+func ReplyToReviewThread(threadId, body string) (PRReviewThreadComment, error) {
+	client, err := gh.DefaultGraphQLClient()
+	if err != nil {
+		return PRReviewThreadComment{}, err
+	}
+	var resp struct {
+		AddPullRequestReviewThreadReply struct {
+			Comment struct {
+				Author    struct{ Login string }
+				Body      string
+				CreatedAt time.Time
+			}
+		}
+	}
+	err = client.Do(`mutation ReplyToThread($thread: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $thread, body: $body}) {
+    comment { author { login } body createdAt }
+  }
+}`, map[string]any{"thread": threadId, "body": body}, &resp)
+	if err != nil {
+		return PRReviewThreadComment{}, err
+	}
+	c := resp.AddPullRequestReviewThreadReply.Comment
+	return PRReviewThreadComment{Author: c.Author.Login, Body: c.Body, CreatedAt: c.CreatedAt}, nil
 }
 
 // DraftReviewComment is a comment on a line (or a range of lines) of the

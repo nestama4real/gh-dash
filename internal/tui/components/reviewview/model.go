@@ -22,6 +22,8 @@ const (
 	modeSubmitChoice
 	modeSubmitBody
 	modeSubmitting
+	modeReply
+	modeReplying
 )
 
 // PR identifies the pull request under review.
@@ -75,6 +77,7 @@ type Model struct {
 
 	mode     mode
 	editing  int // index of the pending comment being edited, -1 for a new one
+	replyTo  int // index of the conversation replied to, in m.threads[path]
 	input    textarea.Model
 	eventIdx int
 	status   string
@@ -216,6 +219,20 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case replySentMsg:
+		if msg.err != nil {
+			m.mode = modeReply
+			m.status = "Could not send the reply: " + msg.err.Error()
+			return m, m.input.Focus()
+		}
+		threads := m.threads[msg.path]
+		if msg.index < len(threads) {
+			threads[msg.index].Comments = append(threads[msg.index].Comments, msg.comment)
+		}
+		m.mode = modeNormal
+		m.status = "Reply sent"
+		return m, nil
+
 	case submittedMsg:
 		if msg.err != nil {
 			m.mode = modeSubmitBody
@@ -233,13 +250,15 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 			return m.updateSubmitChoice(msg)
 		case modeSubmitBody:
 			return m.updateSubmitBody(msg)
-		case modeSubmitting:
+		case modeSubmitting, modeReplying:
 			return m, nil
+		case modeReply:
+			return m.updateReply(msg)
 		}
 		return m.updateNormal(msg)
 	}
 
-	if m.mode == modeCompose || m.mode == modeSubmitBody {
+	if m.IsTyping() {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
@@ -323,6 +342,8 @@ func (m Model) updateNormal(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.foldAll()
 	case "c", "enter":
 		return m.startCompose()
+	case "r":
+		return m.startReply()
 	case "x":
 		m.deletePendingAtCursor()
 	case "S", "s":
@@ -492,6 +513,78 @@ func (m *Model) newInput(placeholder string) textarea.Model {
 	return ta
 }
 
+type replySentMsg struct {
+	path    string
+	index   int
+	comment data.PRReviewThreadComment
+	err     error
+}
+
+// threadAt returns the index, in m.threads[path], of the conversation shown
+// under line i of the current file, or -1.
+func (m *Model) threadAt(i int) int {
+	f := m.currFile()
+	if f == nil || i < 0 || i >= len(f.lines) || !f.lines[i].commentable() {
+		return -1
+	}
+	side, no := f.lines[i].position()
+	for k, t := range m.threads[f.Filename] {
+		tSide := t.DiffSide
+		if tSide == "" {
+			tSide = "RIGHT"
+		}
+		if t.Line == no && tSide == side {
+			return k
+		}
+	}
+	return -1
+}
+
+func (m Model) startReply() (Model, tea.Cmd) {
+	k := m.threadAt(m.currLine())
+	if k < 0 {
+		m.status = "No conversation on this line: move to a line with a blue ●"
+		return m, nil
+	}
+	m.replyTo = k
+	m.input = m.newInput("Write a reply (ctrl+s to send, esc to cancel)")
+	m.mode = modeReply
+	return m, m.input.Focus()
+}
+
+func (m Model) updateReply(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeNormal
+		m.status = ""
+		m.input.Blur()
+		return m, nil
+	case "ctrl+s", "ctrl+d":
+		body := strings.TrimSpace(m.input.Value())
+		if body == "" {
+			m.status = "The reply is empty"
+			return m, nil
+		}
+		f := m.currFile()
+		threads := m.threads[f.Filename]
+		if m.replyTo >= len(threads) {
+			m.mode = modeNormal
+			return m, nil
+		}
+		m.mode = modeReplying
+		m.status = "Sending the reply…"
+		m.input.Blur()
+		path, index, id := f.Filename, m.replyTo, threads[m.replyTo].Id
+		return m, func() tea.Msg {
+			c, err := data.ReplyToReviewThread(id, body)
+			return replySentMsg{path: path, index: index, comment: c, err: err}
+		}
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
 func (m Model) updateCompose(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
@@ -618,5 +711,5 @@ func (m Model) submit() (Model, tea.Cmd) {
 
 // IsTyping reports whether keys go to a text input.
 func (m Model) IsTyping() bool {
-	return m.mode == modeCompose || m.mode == modeSubmitBody
+	return m.mode == modeCompose || m.mode == modeSubmitBody || m.mode == modeReply
 }

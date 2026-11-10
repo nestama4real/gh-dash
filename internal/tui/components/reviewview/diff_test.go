@@ -2,9 +2,15 @@ package reviewview
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/theme"
 )
 
 const patch = `@@ -10,4 +10,5 @@ func main() {
@@ -180,5 +186,36 @@ func TestBuildTree(t *testing.T) {
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("tree:\n got %v\nwant %v", got, want)
+	}
+}
+
+func TestReply(t *testing.T) {
+	ctx := &context.ProgramContext{Config: &config.Config{}, Theme: *theme.DefaultTheme}
+	m := Model{ctx: ctx, pr: PR{Url: "test://reply"}, cursor: map[int]int{}, selFrom: -1,
+		editing: -1, width: 120, height: 40}
+	m.files = []fileDiff{newFileDiff(data.PRFile{Filename: "main.go", Patch: patch})}
+	m.threads = map[string][]data.PRReviewThread{"main.go": {{
+		Id: "T1", Path: "main.go", Line: 12, DiffSide: "RIGHT",
+		Comments: []data.PRReviewThreadComment{{Author: "bob", Body: "Why?"}},
+	}}}
+
+	m.cursor[0] = 1 // new line 10: no conversation
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if m.mode != modeNormal || m.status == "" {
+		t.Fatalf("reply without conversation: mode %d", m.mode)
+	}
+	m.cursor[0] = 4 // new line 12: bob's conversation
+	m, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if m.mode != modeReply || m.replyTo != 0 {
+		t.Fatalf("reply: mode %d replyTo %d", m.mode, m.replyTo)
+	}
+	if !strings.Contains(m.renderDialog(), "@bob") {
+		t.Errorf("dialog does not show who is answered")
+	}
+	// The reply shows once sent.
+	m, _ = m.Update(replySentMsg{path: "main.go", index: 0,
+		comment: data.PRReviewThreadComment{Author: "me", Body: "Because"}})
+	if m.mode != modeNormal || len(m.threads["main.go"][0].Comments) != 2 {
+		t.Errorf("after sending: mode %d, %d comments", m.mode, len(m.threads["main.go"][0].Comments))
 	}
 }
