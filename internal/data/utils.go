@@ -1,6 +1,7 @@
 package data
 
 import (
+	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2"
@@ -45,4 +46,15 @@ func GetAuthorRoleIcon(role string, theme theme.Theme) string {
 			Foreground(compat.AdaptiveColor(theme.UnknownRoleIconColor)).
 			Render(theme.UnknownRoleIcon)
 	}
+}
+
+// hasSortQualifier reports whether a search query sets its own order, e.g.
+// sort:created-desc.
+func hasSortQualifier(query string) bool {
+	for _, tok := range strings.Fields(query) {
+		if strings.HasPrefix(strings.ToLower(tok), "sort:") {
+			return true
+		}
+	}
+	return false
 }

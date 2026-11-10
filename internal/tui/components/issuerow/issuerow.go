@@ -75,12 +75,21 @@ func (issue *Issue) renderRepoName() string {
 }
 
 func (issue *Issue) renderTitle() string {
-	return components.RenderIssueTitle(
+	title := components.RenderIssueTitle(
 		issue.Ctx,
 		issue.Data.State,
 		issue.Data.Title,
 		issue.Data.Number,
 	)
+	// The compact layout already starts with the number.
+	if issue.Ctx.Config.Theme.Ui.Table.Compact {
+		return title
+	}
+	numberFg := issue.Ctx.Theme.SecondaryText
+	if issue.Data.State != "OPEN" {
+		numberFg = issue.Ctx.Theme.FaintText
+	}
+	return lipgloss.NewStyle().Foreground(numberFg).Render(fmt.Sprintf("#%d ", issue.Data.Number)) + title
 }
 
 func (issue *Issue) renderOpenedBy() string {

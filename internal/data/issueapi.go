@@ -116,6 +116,10 @@ func (data IssueData) GetCreatedAt() time.Time {
 }
 
 func makeIssuesQuery(query string) string {
+	// Sort by last update unless the section asks for another order.
+	if hasSortQualifier(query) {
+		return fmt.Sprintf("is:issue archived:false %s", query)
+	}
 	return fmt.Sprintf("is:issue archived:false %s sort:updated", query)
 }
 

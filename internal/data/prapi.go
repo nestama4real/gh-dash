@@ -475,6 +475,10 @@ func (e EnrichedPullRequestData) ToPullRequestData() PullRequestData {
 }
 
 func makePullRequestsQuery(query string) string {
+	// Sort by last update unless the section asks for another order.
+	if hasSortQualifier(query) {
+		return fmt.Sprintf("is:pr archived:false %s", query)
+	}
 	return fmt.Sprintf("is:pr archived:false %s sort:updated", query)
 }
 
