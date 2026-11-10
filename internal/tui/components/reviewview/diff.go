@@ -138,6 +138,57 @@ func (f *fileDiff) expand(i, n int) int {
 	return tail
 }
 
+// collapse hides again the expanded lines at line i: the block it is in,
+// or the block right under a hunk expander or right above the tail
+// expander. It returns the index of the expander, or -1 when there is
+// nothing to fold there.
+func (f *fileDiff) collapse(i int) int {
+	from, to := -1, -1 // block of expanded lines, inclusive
+	switch f.lines[i].kind {
+	case lineExpanded:
+		from, to = i, i
+	case lineHunk:
+		from, to = i+1, i
+	case lineTail:
+		from, to = i, i-1
+	default:
+		return -1
+	}
+	for from > 0 && f.lines[from-1].kind == lineExpanded {
+		from--
+	}
+	for to+1 < len(f.lines) && f.lines[to+1].kind == lineExpanded {
+		to++
+	}
+	if to < from {
+		return -1
+	}
+	underHunk := from > 0 && f.lines[from-1].kind == lineHunk
+	f.lines = append(f.lines[:from], f.lines[to+1:]...)
+	if underHunk {
+		return from - 1
+	}
+	// Lines shown from the tail: bring its expander back.
+	if from >= len(f.lines) || f.lines[from].kind != lineTail {
+		f.lines = append(f.lines[:from], append([]diffLine{{kind: lineTail}}, f.lines[from:]...)...)
+	}
+	return from
+}
+
+// collapseAll hides every expanded line of the file.
+func (f *fileDiff) collapseAll() {
+	kept := f.lines[:0]
+	for _, l := range f.lines {
+		if l.kind != lineExpanded {
+			kept = append(kept, l)
+		}
+	}
+	f.lines = kept
+	if len(f.lines) > 0 && f.Status != "removed" && f.lines[len(f.lines)-1].kind != lineTail {
+		f.lines = append(f.lines, diffLine{kind: lineTail})
+	}
+}
+
 var hunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@ ?(.*)$`)
 
 func parsePatch(patch string) ([]diffLine, int) {

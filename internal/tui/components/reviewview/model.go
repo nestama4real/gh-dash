@@ -308,6 +308,10 @@ func (m Model) updateNormal(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.startExpand(20)
 	case "E":
 		return m.startExpand(0)
+	case "z":
+		m.fold()
+	case "Z":
+		m.foldAll()
 	case "c", "enter":
 		return m.startCompose()
 	case "x":
@@ -377,6 +381,43 @@ func (m *Model) expandAt(i, n int) {
 	if len(f.lines) == before {
 		m.status = "No hidden line here"
 	}
+}
+
+func (m *Model) fold() {
+	f := m.currFile()
+	if f == nil || len(f.lines) == 0 {
+		return
+	}
+	at := f.collapse(m.currLine())
+	if at < 0 {
+		m.status = "Nothing to fold here"
+		return
+	}
+	m.selFrom, m.selByShift = -1, false
+	m.setLine(at)
+}
+
+func (m *Model) foldAll() {
+	f := m.currFile()
+	if f == nil || len(f.lines) == 0 {
+		return
+	}
+	// Keep the cursor on the same diff line.
+	cur := f.lines[m.currLine()]
+	f.collapseAll()
+	m.selFrom, m.selByShift = -1, false
+	idx := 0
+	for i, l := range f.lines {
+		if l.kind == cur.kind && l.oldNo == cur.oldNo && l.newNo == cur.newNo && l.text == cur.text {
+			idx = i
+			break
+		}
+		if cur.kind == lineExpanded && l.newNo > 0 && l.newNo > cur.newNo {
+			idx = max(0, i-1)
+			break
+		}
+	}
+	m.setLine(idx)
 }
 
 func (m *Model) jumpHunk(dir int) {

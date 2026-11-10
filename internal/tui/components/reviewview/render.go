@@ -365,13 +365,21 @@ func (m *Model) renderDiff() string {
 		switch l.kind {
 		case lineHunk:
 			text = strings.TrimSpace(text)
-			if start, end := f.gap(i); end >= start && i == cur {
-				text += fmt.Sprintf("   e: show 20 hidden lines · E: all %d", end-start+1)
+			if i == cur {
+				if start, end := f.gap(i); end >= start {
+					text += fmt.Sprintf("   e: show 20 hidden lines · E: all %d", end-start+1)
+				}
+				if i+1 < len(f.lines) && f.lines[i+1].kind == lineExpanded {
+					text += "   z: fold"
+				}
 			}
 		case lineTail:
 			text = "Rest of the file"
 			if i == cur {
 				text += "   e: show 20 more lines · E: all"
+				if i > 0 && f.lines[i-1].kind == lineExpanded {
+					text += " · z: fold"
+				}
 			}
 		}
 		wrapped := strings.Split(ansi.Hardwrap(text, avail, true), "\n")
@@ -410,7 +418,10 @@ func (m *Model) renderHint() string {
 	case m.selFrom >= 0:
 		hint = faint.Render("selecting lines: j/k extend • c comment the range • esc cancel")
 	default:
-		hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • x delete • e expand • {/} hunk • [/] file • t files • S submit • q back")
+		hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • x delete • e/z expand/fold • {/} hunk • [/] file • t files • S submit • q back")
+		if f := m.currFile(); f != nil && len(f.lines) > 0 && f.lines[m.currLine()].kind == lineExpanded {
+			hint = faint.Render("unchanged line, not commentable • z fold this block • Z fold all")
+		}
 	}
 	return ansi.Truncate(" "+hint, m.width, "…")
 }

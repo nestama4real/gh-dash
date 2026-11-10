@@ -115,3 +115,39 @@ func TestExpand(t *testing.T) {
 		t.Errorf("last line: %+v", last)
 	}
 }
+
+func TestCollapse(t *testing.T) {
+	content := make([]string, 20)
+	for i := range content {
+		content[i] = fmt.Sprintf("line %d", i+1)
+	}
+	f := newFileDiff(data.PRFile{Filename: "main.go", Patch: patch})
+	f.content = content
+	original := len(f.lines)
+
+	// Fold from inside a block above the hunk: back to the hunk expander.
+	f.expand(0, 3)
+	if at := f.collapse(2); at != 0 || len(f.lines) != original {
+		t.Fatalf("collapse above hunk: at %d, %d lines", at, len(f.lines))
+	}
+	// Fold the fully shown tail from its last line: the tail comes back.
+	f.expand(len(f.lines)-1, 0)
+	if f.lines[len(f.lines)-1].kind == lineTail {
+		t.Fatalf("tail still there")
+	}
+	at := f.collapse(len(f.lines) - 1)
+	if at < 0 || f.lines[at].kind != lineTail || len(f.lines) != original {
+		t.Fatalf("collapse tail: at %d, %d lines", at, len(f.lines))
+	}
+	// Nothing to fold on a changed line.
+	if at := f.collapse(3); at != -1 {
+		t.Errorf("collapse on a changed line: %d", at)
+	}
+	// Fold everything.
+	f.expand(0, 2)
+	f.expand(len(f.lines)-1, 2)
+	f.collapseAll()
+	if len(f.lines) != original || f.lines[len(f.lines)-1].kind != lineTail {
+		t.Errorf("collapseAll: %d lines", len(f.lines))
+	}
+}
