@@ -17,7 +17,7 @@ import (
 const (
 	headerHeight = 3 // title, file, rule
 	hintHeight   = 1
-	gutterWidth  = 11 // "1234 1234 +"
+	gutterWidth  = 12 // "●1234 1234 +": comment mark, old and new numbers, +/-
 )
 
 func (m *Model) diffHeight() int {
@@ -232,39 +232,87 @@ func (m *Model) indentBlock(s string) []string {
 	return lines
 }
 
-func (m *Model) renderThread(t data.PRReviewThread, width int) string {
+// commentBox renders comments in a box tinted with the given color, so that
+// they stand out from the code. Every piece carries the background: inner
+// styles would otherwise reset it.
+func (m *Model) commentBox(colorName, title string, sections [][2]string, width int) string {
 	theme := m.ctx.Theme
-	var parts []string
-	for _, c := range t.Comments {
-		author := lipgloss.NewStyle().Bold(true).Foreground(theme.PrimaryText).Render("@" + c.Author)
-		parts = append(parts, author+"\n"+lipgloss.NewStyle().Foreground(theme.SecondaryText).
-			Width(width-4).Render(strings.TrimSpace(c.Body)))
+	bg := m.tint(colorName, 0.13)
+	accent := m.gh(colorName)
+	inner := max(10, width-4)
+	line := func(s lipgloss.Style, text string) string {
+		return s.Background(bg).Width(inner).Render(text)
 	}
-	title := "Conversation"
-	if t.IsResolved {
-		title += " (resolved)"
+	rows := []string{line(lipgloss.NewStyle().Foreground(accent).Bold(true), title)}
+	for _, sec := range sections {
+		rows = append(rows, line(lipgloss.NewStyle(), ""))
+		if sec[0] != "" {
+			rows = append(rows, line(lipgloss.NewStyle().Foreground(accent).Bold(true), sec[0]))
+		}
+		rows = append(rows, line(lipgloss.NewStyle().Foreground(theme.PrimaryText), sec[1]))
 	}
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.FaintBorder).
+		Border(lipgloss.ThickBorder(), false, false, false, true).
+		BorderForeground(accent).
+		BorderBackground(bg).
+		Background(bg).
 		Padding(0, 1).
 		Width(width).
-		Render(lipgloss.NewStyle().Foreground(theme.FaintText).Render(title) + "\n" +
-			strings.Join(parts, "\n\n"))
+		Render(strings.Join(rows, "\n"))
+}
+
+func (m *Model) renderThread(t data.PRReviewThread, width int) string {
+	var sections [][2]string
+	for _, c := range t.Comments {
+		sections = append(sections, [2]string{"@" + c.Author, strings.TrimSpace(c.Body)})
+	}
+	title := "💬 Conversation"
+	colorName := "BLUE"
+	if t.IsResolved {
+		title += " · resolved"
+		colorName = "GRAY"
+	}
+	if n := len(t.Comments); n > 1 {
+		title += fmt.Sprintf(" · %d comments", n)
+	}
+	return m.commentBox(colorName, title, sections, width)
 }
 
 func (m *Model) renderDraft(d draft, width int) string {
-	label := "Pending comment"
+	label := "✎ Pending comment"
 	if d.StartLine > 0 && d.StartLine != d.Line {
-		label = fmt.Sprintf("Pending comment on lines %d-%d", d.StartLine, d.Line)
+		label = fmt.Sprintf("✎ Pending comment on lines %d-%d", d.StartLine, d.Line)
 	}
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.gh("YELLOW")).
-		Padding(0, 1).
-		Width(width).
-		Render(lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Render(label+"  (c edit · x delete)") +
-			"\n" + lipgloss.NewStyle().Foreground(m.ctx.Theme.PrimaryText).Width(width-4).Render(d.Body))
+	return m.commentBox("YELLOW", label+"  ·  c edit · x delete",
+		[][2]string{{"", d.Body}}, width)
+}
+
+// hasComments reports whether comments are shown under line i, and their
+// color.
+func (m *Model) commentMark(f *fileDiff, i int) (string, bool) {
+	l := f.lines[i]
+	if !l.commentable() {
+		return "", false
+	}
+	side, no := l.position()
+	for _, d := range m.pending() {
+		if d.Path == f.Filename && d.Side == side && d.Line == no {
+			return "YELLOW", true
+		}
+	}
+	for _, t := range m.threads[f.Filename] {
+		tSide := t.DiffSide
+		if tSide == "" {
+			tSide = "RIGHT"
+		}
+		if t.Line == no && tSide == side {
+			if t.IsResolved {
+				return "GRAY", true
+			}
+			return "BLUE", true
+		}
+	}
+	return "", false
 }
 
 // itemRows returns, for each line, its rows and the rows of its blocks.
@@ -392,11 +440,18 @@ func (m *Model) renderDiff() string {
 		for r, part := range wrapped {
 			gutter := strings.Repeat(" ", gutterWidth)
 			if r == 0 && !l.isExpander() {
-				gutter = num(l.oldNo) + " " + num(l.newNo) + " " + marker
+				gutter = " " + num(l.oldNo) + " " + num(l.newNo) + " " + marker
 			} else if r == 0 {
 				gutter = strings.Repeat(" ", gutterWidth-1) + "⋯"
 			}
-			line := gutterStyle.Render(gutter) + style.Width(avail).Render(part)
+			var line string
+			if colorName, ok := m.commentMark(f, i); ok && r == 0 {
+				// A dot in the gutter flags the lines carrying comments.
+				line = gutterStyle.Foreground(m.gh(colorName)).Bold(true).Render("●") +
+					gutterStyle.Render(gutter[1:]) + style.Width(avail).Render(part)
+			} else {
+				line = gutterStyle.Render(gutter) + style.Width(avail).Render(part)
+			}
 			if row >= m.offset && len(out) < height {
 				out = append(out, line)
 			}
