@@ -116,6 +116,7 @@ func New(ctx *context.ProgramContext, pr PR, width, height int) (Model, tea.Cmd)
 func (m *Model) SetSize(width, height int) {
 	m.width, m.height = width, height
 	m.input.SetWidth(m.inputWidth())
+	m.clampOffset()
 }
 
 func (m *Model) pending() []draft {
@@ -164,6 +165,14 @@ func (m *Model) setFile(i int) {
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
+	m, cmd := m.update(msg)
+	// Scroll only when the cursor leaves the screen, and remember it: the
+	// screen then stays put while the cursor moves within it.
+	m.clampOffset()
+	return m, cmd
+}
+
+func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case loadedMsg:
 		m.loading = false

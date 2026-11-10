@@ -297,7 +297,13 @@ func (m *Model) clampOffset() {
 	if start+curRows > m.offset+h {
 		m.offset = start + curRows - h
 	}
-	m.offset = max(0, m.offset)
+	// Do not leave empty space at the bottom, e.g. after folding lines.
+	total := start
+	for i := cur; i < len(f.lines); i++ {
+		rows, blocks := m.itemRows(f, i)
+		total += rows + len(blocks)
+	}
+	m.offset = max(0, min(m.offset, total-h))
 }
 
 func (m *Model) renderDiff() string {
