@@ -40,6 +40,7 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prssection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prview"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/reposection"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/reviewview"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/section"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/sidebar"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tabs"
@@ -77,6 +78,7 @@ type Model struct {
 	previewBeforeBoard bool
 	mode               Mode
 	imagePopup         *imagePopup
+	review             *reviewview.Model
 }
 
 type Mode int
@@ -204,6 +206,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var (
+		reviewCmd tea.Cmd
+		handled   bool
+	)
+	if m.review != nil {
+		if reviewCmd, handled = m.updateReview(msg); handled {
+			return m, reviewCmd
+		}
+	}
+	model, cmd := m.updateDashboard(msg)
+	return model, tea.Batch(reviewCmd, cmd)
+}
+
+func (m *Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		cmd             tea.Cmd
 		tabsCmd         tea.Cmd
@@ -466,6 +482,9 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			case key.Matches(msg, keys.PRKeys.Approve):
 				return m, m.openSidebarForPRInput(m.prView.SetIsApproving)
+
+			case key.Matches(msg, keys.PRKeys.Diff):
+				return m, m.openReview(currRowData)
 
 			case key.Matches(msg, keys.PRKeys.Assign):
 				return m, m.openSidebarForPRInput(m.prView.SetIsAssigning)
@@ -1023,6 +1042,11 @@ func (m *Model) View() tea.View {
 			lipgloss.Center,
 			"Reading config...",
 		)
+		return v
+	}
+
+	if m.review != nil {
+		v.SetContent(lipgloss.JoinVertical(lipgloss.Left, m.review.View(), m.footer.View()))
 		return v
 	}
 
