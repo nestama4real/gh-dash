@@ -279,9 +279,13 @@ func (m *Model) blocks(f *fileDiff, i int) []string {
 			out = append(out, m.renderThread(t, k, width))
 		}
 	}
-	for _, d := range m.pending() {
+	for k, d := range m.pending() {
 		if d.Path == f.Filename && d.Side == side && d.Line == no {
-			out = append(out, m.renderDraft(d, width))
+			if m.pr.Local != nil {
+				out = append(out, m.renderNote(d, k, width))
+			} else {
+				out = append(out, m.renderDraft(d, width))
+			}
 		}
 	}
 	return out
@@ -388,6 +392,48 @@ func (m *Model) renderDraft(d draft, width int) string {
 	return m.card("YELLOW", left+strings.Repeat(" ", gap)+right, [][3]string{{"", "", d.Body}}, "", width)
 }
 
+// renderNote renders a local note and its discussion; folded, a single
+// line.
+func (m *Model) renderNote(d draft, k int, width int) string {
+	faint := lipgloss.NewStyle().Foreground(m.ctx.Theme.FaintText)
+	where := rangeLabel(d.StartLine, d.Line)
+	if d.Folded {
+		first, _, _ := strings.Cut(strings.TrimSpace(d.Body), "\n")
+		replies := ""
+		if n := len(d.Replies); n > 0 {
+			replies = fmt.Sprintf("  ·  %d repl%s", n, map[bool]string{true: "ies", false: "y"}[n > 1])
+		}
+		left := faint.Render(fmt.Sprintf("▸ Note %d  ·  %s  ·  ", d.Id, where))
+		right := faint.Render(replies + "   f unfold")
+		room := max(4, width-4-ansi.StringWidth(left)-ansi.StringWidth(right))
+		body := lipgloss.NewStyle().Foreground(m.ctx.Theme.SecondaryText).Render(ansi.Truncate(first, room, "…"))
+		gap := max(1, width-4-ansi.StringWidth(left)-ansi.StringWidth(body)-ansi.StringWidth(right))
+		return m.card("GRAY", left+body+strings.Repeat(" ", gap)+right, nil, "", width)
+	}
+	left := lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Bold(true).Render(fmt.Sprintf("✎ Note %d", d.Id)) +
+		faint.Render("  ·  "+where)
+	right := faint.Render("c edit · x delete · f fold")
+	gap := max(1, width-4-ansi.StringWidth(left)-ansi.StringWidth(right))
+	author := m.ctx.User
+	if author == "" {
+		author = "me"
+	}
+	comments := [][3]string{{author, "  " + utils.TimeElapsed(d.CreatedAt), d.Body}}
+	for _, r := range d.Replies {
+		comments = append(comments, [3]string{r.Author, "  " + utils.TimeElapsed(r.CreatedAt), r.Body})
+	}
+	footer := faint.Render("↳ r reply")
+	if m.isReplyingToNote(k) {
+		status := faint.Render("ctrl+s save • esc cancel")
+		if m.status != "" {
+			status = lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Render(m.status)
+		}
+		footer = lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Bold(true).Render("Reply") +
+			"\n" + m.input.View() + "\n" + status
+	}
+	return m.card("YELLOW", left+strings.Repeat(" ", gap)+right, comments, footer, width)
+}
+
 // mark tells how the gutter flags a line covered by comments: a bar along
 // the commented range and a dot on its last line, where the comments show.
 type mark struct {
@@ -439,7 +485,11 @@ func (m *Model) marks(f *fileDiff) map[int]mark {
 	}
 	for _, d := range m.pending() {
 		if d.Path == f.Filename {
-			add("YELLOW", d.Side, d.Line, d.StartSide, d.StartLine, true)
+			color := "YELLOW"
+			if d.Folded {
+				color = "GRAY"
+			}
+			add(color, d.Side, d.Line, d.StartSide, d.StartLine, true)
 		}
 	}
 	return marks
@@ -641,7 +691,7 @@ func (m *Model) renderHint() string {
 	default:
 		hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • r reply • x delete • e/z expand/fold • {/} hunk • [/] file • t files • m viewed • S submit • q back")
 		if m.pr.Local != nil {
-			hint = faint.Render("j/k line • shift+↑/↓ or v select • c note • x delete • e/z expand/fold • {/} hunk • [/] file • t files • m viewed • u branch/uncommitted • C commits • S notes file • q back")
+			hint = faint.Render("j/k line • shift+↑/↓ or v select • c note • r reply • f fold • x delete • e/z expand/fold • {/} hunk • [/] file • t files • m viewed • u branch/uncommitted • C commits • S notes file • q back")
 		}
 		if f := m.currFile(); f != nil && len(f.lines) > 0 && f.lines[m.currLine()].kind == lineExpanded {
 			hint = faint.Render("unchanged line, not commentable • z fold this block • Z fold all")

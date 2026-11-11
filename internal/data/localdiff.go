@@ -128,10 +128,31 @@ func IsWorktreeClean(dir string) bool {
 // and coding agents, one file per branch.
 type LocalNote struct {
 	DraftReviewComment
+	Id        int    // stable within the branch, from 1
 	Commit    string `json:",omitempty"` // empty: the working tree
 	Subject   string `json:",omitempty"` // of the commit
 	Excerpt   string `json:",omitempty"` // diff lines commented
 	CreatedAt time.Time
+	Replies   []NoteReply `json:",omitempty"`
+	// Folded: the discussion is closed, agents leave it alone.
+	Folded bool `json:",omitempty"`
+}
+
+// NoteReply is an answer in the discussion of a note, by its author or by
+// an agent.
+type NoteReply struct {
+	Author    string
+	Body      string
+	CreatedAt time.Time
+}
+
+// NextNoteId is the id of a new note among these.
+func NextNoteId(notes []LocalNote) int {
+	n := 0
+	for _, x := range notes {
+		n = max(n, x.Id)
+	}
+	return n + 1
 }
 
 // NotesMeta describes the worktree the notes are about.
@@ -174,6 +195,12 @@ func LoadLocalNotes(repo, branch string) []LocalNote {
 	var notes []LocalNote
 	if json.Unmarshal(b, &notes) != nil {
 		return nil
+	}
+	// Notes written before ids existed.
+	for i := range notes {
+		if notes[i].Id == 0 {
+			notes[i].Id = NextNoteId(notes)
+		}
 	}
 	return notes
 }
@@ -223,7 +250,7 @@ func RenderNotesMarkdown(meta NotesMeta, notes []LocalNote) string {
 		meta.Repo, meta.Dir, meta.Base, len(notes))
 	b.WriteString("Line numbers refer to the new version of the file (`+` and unchanged lines) " +
 		"or to the old one for removed lines (`-`). Notes on a commit refer to the files as of that commit.\n")
-	for i, n := range sorted {
+	for _, n := range sorted {
 		where := fmt.Sprintf("%s:%d", n.Path, n.Line)
 		if n.StartLine > 0 && n.StartLine != n.Line {
 			where = fmt.Sprintf("%s:%d-%d", n.Path, n.StartLine, n.Line)
@@ -231,7 +258,11 @@ func RenderNotesMarkdown(meta NotesMeta, notes []LocalNote) string {
 		if n.Side == "LEFT" {
 			where += " (removed lines)"
 		}
-		fmt.Fprintf(&b, "\n## %d. `%s`\n\n", i+1, where)
+		state := ""
+		if n.Folded {
+			state = " (closed)"
+		}
+		fmt.Fprintf(&b, "\n## Note %d: `%s`%s\n\n", n.Id, where, state)
 		if n.Commit != "" {
 			fmt.Fprintf(&b, "On commit %s", n.Commit)
 			if n.Subject != "" {
@@ -243,6 +274,10 @@ func RenderNotesMarkdown(meta NotesMeta, notes []LocalNote) string {
 			b.WriteString("```diff\n" + strings.TrimRight(n.Excerpt, "\n") + "\n```\n\n")
 		}
 		b.WriteString(strings.TrimSpace(n.Body) + "\n")
+		for _, r := range n.Replies {
+			fmt.Fprintf(&b, "\n> **%s** replied:\n>\n> %s\n", r.Author,
+				strings.ReplaceAll(strings.TrimSpace(r.Body), "\n", "\n> "))
+		}
 	}
 	return b.String()
 }

@@ -101,12 +101,14 @@ type Model struct {
 	// loadSeq numbers the loads of a worktree, to drop stale results.
 	loadSeq int
 
-	mode     mode
-	editing  int // index of the pending comment being edited, -1 for a new one
-	replyTo  int // index of the conversation replied to, in m.threads[path]
-	input    textarea.Model
-	eventIdx int
-	pickIdx  int
+	mode    mode
+	editing int // index of the pending comment being edited, -1 for a new one
+	replyTo int // index of the conversation replied to, in m.threads[path]
+	// replyNote is the index in pending() of the local note replied to.
+	replyNote int
+	input     textarea.Model
+	eventIdx  int
+	pickIdx   int
 	// viewed maps the files marked as viewed to their patch's hash.
 	viewed map[string]string
 	status string
@@ -499,6 +501,8 @@ func (m Model) updateNormal(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.deletePendingAtCursor()
 	case "m":
 		m.toggleViewed()
+	case "f":
+		m.toggleNoteFold()
 	case "u":
 		return m.toggleUncommitted()
 	case "C":
@@ -721,6 +725,102 @@ func (m *Model) isReplyingTo(path string, k int) bool {
 		f.Filename == path && m.replyTo == k
 }
 
+// nearestNote returns the line of the current file carrying the local note
+// closest to the cursor (below it on a tie), or -1.
+func (m *Model) nearestNote() int {
+	f := m.currFile()
+	if f == nil {
+		return -1
+	}
+	cur, best := m.currLine(), -1
+	for i := range f.lines {
+		if !f.lines[i].commentable() || m.pendingAt(i) < 0 {
+			continue
+		}
+		if best < 0 || abs(i-cur) < abs(best-cur) || (abs(i-cur) == abs(best-cur) && i > best) {
+			best = i
+		}
+	}
+	return best
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// startNoteReply opens the reply box under the local note closest to the
+// cursor: the discussion with the agents.
+func (m Model) startNoteReply() (Model, tea.Cmd) {
+	line := m.nearestNote()
+	if line < 0 {
+		m.status = "No note in this file"
+		return m, nil
+	}
+	m.selFrom, m.selByShift = -1, false
+	m.setLine(line)
+	m.replyNote = m.pendingAt(line)
+	if p := m.pending(); p[m.replyNote].Folded {
+		p = append([]draft(nil), p...)
+		p[m.replyNote].Folded = false
+		m.setPending(p)
+	}
+	m.input = m.newInput("Write a reply")
+	m.input.SetWidth(max(10, m.cardWidth()-6))
+	m.input.SetHeight(4)
+	m.status = ""
+	m.mode = modeReply
+	return m, m.input.Focus()
+}
+
+func (m *Model) saveNoteReply(body string) {
+	p := append([]draft(nil), m.pending()...)
+	m.mode = modeNormal
+	m.input.Blur()
+	if m.replyNote < 0 || m.replyNote >= len(p) {
+		return
+	}
+	author := m.ctx.User
+	if author == "" {
+		author = "me"
+	}
+	d := &p[m.replyNote]
+	d.Replies = append(append([]data.NoteReply(nil), d.Replies...),
+		data.NoteReply{Author: author, Body: body, CreatedAt: time.Now()})
+	m.setPending(p)
+	m.status = "Reply saved"
+}
+
+// toggleNoteFold folds the discussion of the note closest to the cursor:
+// folded, it is closed, and agents leave it alone.
+func (m *Model) toggleNoteFold() {
+	if m.pr.Local == nil {
+		return
+	}
+	line := m.nearestNote()
+	if line < 0 {
+		m.status = "No note in this file"
+		return
+	}
+	m.setLine(line)
+	k := m.pendingAt(line)
+	p := append([]draft(nil), m.pending()...)
+	p[k].Folded = !p[k].Folded
+	m.setPending(p)
+	if p[k].Folded {
+		m.status = fmt.Sprintf("Note %d folded: closed", p[k].Id)
+	} else {
+		m.status = fmt.Sprintf("Note %d unfolded: open again", p[k].Id)
+	}
+}
+
+// isReplyingToNote reports whether the reply box is open on that note.
+func (m *Model) isReplyingToNote(k int) bool {
+	return m.pr.Local != nil && m.mode == modeReply && m.replyNote == k
+}
+
 // nearestThread returns the line of the current file carrying the
 // conversation closest to the cursor (below it on a tie), or -1.
 func (m *Model) nearestThread() int {
@@ -750,6 +850,9 @@ func (m *Model) nearestThread() int {
 // startReply opens the reply box under the conversation closest to the
 // cursor, moving the cursor to it.
 func (m Model) startReply() (Model, tea.Cmd) {
+	if m.pr.Local != nil {
+		return m.startNoteReply()
+	}
 	line := m.nearestThread()
 	if line < 0 {
 		m.status = "No conversation in this file"
@@ -777,6 +880,10 @@ func (m Model) updateReply(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		body := strings.TrimSpace(m.input.Value())
 		if body == "" {
 			m.status = "The reply is empty"
+			return m, nil
+		}
+		if m.pr.Local != nil {
+			m.saveNoteReply(body)
 			return m, nil
 		}
 		f := m.currFile()
@@ -838,7 +945,12 @@ func (m *Model) saveDraft(body string) {
 	}
 	from, to := m.selection()
 	side, line := f.lines[to].position()
+	notes := make([]data.LocalNote, 0, len(m.allPending()))
+	for _, x := range m.allPending() {
+		notes = append(notes, x.LocalNote)
+	}
 	d := draft{data.LocalNote{
+		Id:                 data.NextNoteId(notes),
 		DraftReviewComment: data.DraftReviewComment{Path: f.Filename, Line: line, Side: side, Body: body},
 		Excerpt:            f.excerpt(from, to),
 		CreatedAt:          time.Now(),
