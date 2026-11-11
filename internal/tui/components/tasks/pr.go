@@ -66,8 +66,7 @@ func fireTask(ctx *context.ProgramContext, task GitHubTask) tea.Cmd {
 	return tea.Batch(startCmd, func() tea.Msg {
 		log.Info("Running task", "cmd", "gh "+strings.Join(task.Args, " "))
 		c := exec.Command("gh", task.Args...)
-
-		err := c.Run()
+		err := RunGh(ctx.User, task.Args)
 		return constants.TaskFinishedMsg{
 			TaskId:      task.Id,
 			SectionId:   task.Section.Id,
@@ -189,7 +188,7 @@ func MergePR(ctx *context.ProgramContext, section SectionIdentifier, pr data.Row
 	startCmd := ctx.StartTask(task)
 
 	return tea.Batch(startCmd, tea.ExecProcess(c, func(err error) tea.Msg {
-		isMerged := err == nil && c.ProcessState.ExitCode() == 0
+		isMerged := err == nil
 
 		return constants.TaskFinishedMsg{
 			SectionId:   section.Id,
@@ -231,7 +230,7 @@ func CreatePR(
 	startCmd := ctx.StartTask(task)
 
 	return tea.Batch(startCmd, tea.ExecProcess(c, func(err error) tea.Msg {
-		isCreated := err == nil && c.ProcessState.ExitCode() == 0
+		isCreated := err == nil
 
 		return constants.TaskFinishedMsg{
 			SectionId:   section.Id,

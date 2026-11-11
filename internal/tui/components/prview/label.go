@@ -2,7 +2,6 @@ package prview
 
 import (
 	"fmt"
-	"os/exec"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -56,9 +55,7 @@ func (m *Model) label(labels []string) tea.Cmd {
 
 	startCmd := m.ctx.StartTask(task)
 	return tea.Batch(startCmd, func() tea.Msg {
-		c := exec.Command("gh", commandArgs...)
-
-		err := c.Run()
+		err := tasks.RunGh(m.ctx.User, commandArgs)
 
 		returnedLabels := data.PRLabels{Nodes: []data.Label{}}
 		for _, label := range labels {
