@@ -299,3 +299,35 @@ func CommitFileLines(dir, sha, path string) ([]string, error) {
 	}
 	return strings.Split(strings.TrimSuffix(out, "\n"), "\n"), nil
 }
+
+// CurrentWorktree describes the worktree containing dir: its top folder,
+// branch and GitHub repository.
+func CurrentWorktree(dir string) (NotesMeta, error) {
+	top, err := git(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return NotesMeta{}, fmt.Errorf("not in a git worktree: %w", err)
+	}
+	top = strings.TrimSpace(top)
+	branch, err := git(top, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		return NotesMeta{}, errors.New("detached HEAD: no branch, hence no notes")
+	}
+	repo := RepoNameFromRemote(top)
+	if repo == "" {
+		return NotesMeta{}, errors.New("no GitHub remote named origin")
+	}
+	return NotesMeta{Repo: repo, Branch: strings.TrimSpace(branch), Dir: top, Base: DefaultBase(top)}, nil
+}
+
+// ReplyToLocalNote adds a reply to a note of a branch.
+func ReplyToLocalNote(meta NotesMeta, id int, author, body string) error {
+	notes := LoadLocalNotes(meta.Repo, meta.Branch)
+	for i := range notes {
+		if notes[i].Id == id {
+			notes[i].Replies = append(notes[i].Replies,
+				NoteReply{Author: author, Body: strings.TrimSpace(body), CreatedAt: time.Now()})
+			return SaveLocalNotes(meta, notes)
+		}
+	}
+	return fmt.Errorf("no note %d on %s", id, meta.Branch)
+}

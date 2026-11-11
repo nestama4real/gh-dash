@@ -5,6 +5,7 @@ package reviewview
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -138,6 +139,10 @@ func New(ctx *context.ProgramContext, pr PR, width, height int) (Model, tea.Cmd)
 		showTree: true,
 	}
 	m.viewed = data.LoadViewed(m.pendingKey())
+	if pr.Local != nil {
+		// Agents may have replied since: read the notes again.
+		delete(pendingByPR, m.pendingKey())
+	}
 	cmd := m.load()
 	return m, cmd
 }
@@ -210,6 +215,26 @@ func (m *Model) SetSize(width, height int) {
 	m.clampOffset()
 }
 
+// mergeReplies keeps the replies on disk and adds the new ones, in time
+// order.
+func mergeReplies(disk, mine []data.NoteReply) []data.NoteReply {
+	res := append([]data.NoteReply(nil), disk...)
+	for _, r := range mine {
+		found := false
+		for _, d := range disk {
+			if d.Author == r.Author && d.CreatedAt.Equal(r.CreatedAt) && d.Body == r.Body {
+				found = true
+				break
+			}
+		}
+		if !found {
+			res = append(res, r)
+		}
+	}
+	sort.SliceStable(res, func(i, j int) bool { return res[i].CreatedAt.Before(res[j].CreatedAt) })
+	return res
+}
+
 // allPending is every pending comment; for a worktree, the notes of all
 // its diffs (whole branch and single commits).
 func (m *Model) allPending() []draft {
@@ -257,6 +282,16 @@ func (m *Model) setPending(p []draft) {
 	for _, d := range p {
 		d.Commit, d.Subject = l.Commit, l.Subject
 		all = append(all, d)
+	}
+	// Keep the replies written meanwhile by agents.
+	disk := map[int]data.LocalNote{}
+	for _, n := range data.LoadLocalNotes(m.pr.Repo, l.Branch) {
+		disk[n.Id] = n
+	}
+	for i := range all {
+		if d, ok := disk[all[i].Id]; ok {
+			all[i].Replies = mergeReplies(d.Replies, all[i].Replies)
+		}
 	}
 	pendingByPR[key] = all
 	notes := make([]data.LocalNote, 0, len(all))

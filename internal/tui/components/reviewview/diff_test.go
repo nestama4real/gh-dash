@@ -1,6 +1,8 @@
 package reviewview
 
 import (
+	"time"
+
 	"fmt"
 	"strings"
 	"testing"
@@ -237,5 +239,18 @@ func TestReplyWithoutConversation(t *testing.T) {
 	m, _ = m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
 	if m.mode != modeNormal || m.status == "" {
 		t.Errorf("mode %d status %q", m.mode, m.status)
+	}
+}
+
+func TestMergeReplies(t *testing.T) {
+	t0 := time.Date(2026, 11, 11, 10, 0, 0, 0, time.UTC)
+	agent := data.NoteReply{Author: "claude", Body: "done", CreatedAt: t0.Add(time.Minute)}
+	mine := data.NoteReply{Author: "me", Body: "why?", CreatedAt: t0}
+	mineLater := data.NoteReply{Author: "me", Body: "thanks", CreatedAt: t0.Add(2 * time.Minute)}
+	// The review had [mine] in memory, then the agent replied on disk, then
+	// I replied again.
+	got := mergeReplies([]data.NoteReply{mine, agent}, []data.NoteReply{mine, mineLater})
+	if len(got) != 3 || got[0] != mine || got[1] != agent || got[2] != mineLater {
+		t.Fatalf("got %+v", got)
 	}
 }
