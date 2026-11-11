@@ -3,6 +3,7 @@ package tui
 import (
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prrow"
@@ -40,6 +41,9 @@ func (m *Model) updateReview(msg tea.Msg) (tea.Cmd, bool) {
 		m.review = nil
 		if !msg.Submitted {
 			return nil, true
+		}
+		if m.ctx.View == config.WorkView {
+			return m.notify("Review submitted"), true
 		}
 		return tea.Batch(m.notify("Review submitted"), m.prView.RefetchCurrRow()), true
 

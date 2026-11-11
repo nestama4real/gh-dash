@@ -33,6 +33,27 @@ type PR struct {
 	Title  string
 	Url    string
 	Author string
+	// Local is set to review a local worktree instead: its diff is read
+	// with git, and Number is its pull request, if any (0 otherwise).
+	Local *Local
+}
+
+// Local is a worktree under review.
+type Local struct {
+	Dir       string
+	Branch    string
+	Base      string // shown, e.g. origin/main
+	MergeBase string
+	// Uncommitted reviews the uncommitted changes only (diff against HEAD)
+	// instead of the whole branch since the merge base.
+	Uncommitted bool
+}
+
+func (l *Local) diffBase() string {
+	if l.Uncommitted {
+		return "HEAD"
+	}
+	return l.MergeBase
 }
 
 // draft is a pending comment, kept until the review is submitted.
@@ -74,6 +95,13 @@ type Model struct {
 	// with the next plain move.
 	selByShift bool
 	headSha    string
+	// prSynced is true for a worktree whose checkout is exactly the head of
+	// its pull request: the review and the conversations then apply to it.
+	prSynced bool
+	// loadSeq numbers the loads of a worktree, to drop stale results.
+	loadSeq   int
+	localHead string
+	clean     bool
 
 	mode     mode
 	editing  int // index of the pending comment being edited, -1 for a new one
@@ -93,6 +121,16 @@ type loadedMsg struct {
 	files   []data.PRFile
 	context data.PRReviewContext
 	err     error
+	// for a worktree
+	localHead string
+	clean     bool
+	seq       int
+}
+
+// prContextMsg brings the pull request of a worktree, after its diff.
+type prContextMsg struct {
+	context data.PRReviewContext
+	seq     int
 }
 
 type submittedMsg struct {
@@ -105,8 +143,30 @@ func New(ctx *context.ProgramContext, pr PR, width, height int) (Model, tea.Cmd)
 		loading: true, cursor: map[int]int{}, selFrom: -1, editing: -1,
 		showTree: true,
 	}
-	repo, number := pr.Repo, pr.Number
-	return m, func() tea.Msg {
+	cmd := m.load()
+	return m, cmd
+}
+
+func (m *Model) load() tea.Cmd {
+	repo, number := m.pr.Repo, m.pr.Number
+	if l := m.pr.Local; l != nil {
+		m.loadSeq++
+		dir, base, seq := l.Dir, l.diffBase(), m.loadSeq
+		cmds := []tea.Cmd{func() tea.Msg {
+			files, err := data.LocalDiffFiles(dir, base)
+			return loadedMsg{files: files, err: err, seq: seq,
+				localHead: data.HeadSha(dir), clean: data.IsWorktreeClean(dir)}
+		}}
+		if number > 0 {
+			cmds = append(cmds, func() tea.Msg {
+				// Without GitHub, the notes simply stay local.
+				rc, _ := data.FetchPRReviewContext(repo, number)
+				return prContextMsg{context: rc, seq: seq}
+			})
+		}
+		return tea.Sequence(cmds...)
+	}
+	return func() tea.Msg {
 		files, err := data.FetchPRFiles(repo, number)
 		if err != nil {
 			return loadedMsg{err: err}
@@ -116,6 +176,33 @@ func New(ctx *context.ProgramContext, pr PR, width, height int) (Model, tea.Cmd)
 	}
 }
 
+// pendingKey identifies the pending comments: per PR, or per worktree
+// branch for local notes.
+func (m *Model) pendingKey() string {
+	if l := m.pr.Local; l != nil {
+		return "local:" + m.pr.Repo + ":" + l.Branch
+	}
+	return m.pr.Url
+}
+
+// toggleUncommitted switches a worktree review between the whole branch
+// and the uncommitted changes only.
+func (m Model) toggleUncommitted() (Model, tea.Cmd) {
+	if m.pr.Local == nil {
+		return m, nil
+	}
+	l := *m.pr.Local
+	l.Uncommitted = !l.Uncommitted
+	m.pr.Local = &l
+	m.loading, m.err, m.prSynced = true, nil, false
+	m.files, m.tree, m.threads = nil, nil, nil
+	m.fileIdx, m.offset = 0, 0
+	m.cursor = map[int]int{}
+	m.selFrom, m.selByShift = -1, false
+	cmd := m.load()
+	return m, cmd
+}
+
 func (m *Model) SetSize(width, height int) {
 	m.width, m.height = width, height
 	m.input.SetWidth(m.inputWidth())
@@ -123,11 +210,29 @@ func (m *Model) SetSize(width, height int) {
 }
 
 func (m *Model) pending() []draft {
-	return pendingByPR[m.pr.Url]
+	key := m.pendingKey()
+	p, ok := pendingByPR[key]
+	if !ok && m.pr.Local != nil {
+		for _, c := range data.LoadLocalNotes(key) {
+			p = append(p, draft{c})
+		}
+		pendingByPR[key] = p
+	}
+	return p
 }
 
 func (m *Model) setPending(p []draft) {
-	pendingByPR[m.pr.Url] = p
+	key := m.pendingKey()
+	pendingByPR[key] = p
+	if m.pr.Local != nil {
+		notes := make([]data.DraftReviewComment, 0, len(p))
+		for _, d := range p {
+			notes = append(notes, d.DraftReviewComment)
+		}
+		if err := data.SaveLocalNotes(key, notes); err != nil {
+			m.status = "Could not save the notes: " + err.Error()
+		}
+	}
 }
 
 func (m *Model) currFile() *fileDiff {
@@ -177,19 +282,26 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case prContextMsg:
+		if msg.seq != m.loadSeq || m.loading {
+			return m, nil
+		}
+		m.applyPRContext(msg.context)
+		return m, nil
+
 	case loadedMsg:
+		if m.pr.Local != nil && msg.seq != m.loadSeq {
+			return m, nil
+		}
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
 		}
-		m.prId = msg.context.Id
-		m.headSha = msg.context.HeadSha
+		m.localHead, m.clean = msg.localHead, msg.clean
 		m.threads = map[string][]data.PRReviewThread{}
-		for _, t := range msg.context.Threads {
-			if !t.IsOutdated {
-				m.threads[t.Path] = append(m.threads[t.Path], t)
-			}
+		if m.pr.Local == nil {
+			m.applyPRContext(msg.context)
 		}
 		for _, f := range msg.files {
 			m.files = append(m.files, newFileDiff(f))
@@ -264,6 +376,26 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// applyPRContext keeps what the review of the pull request needs. For a
+// worktree, the conversations are only shown when it is checked out at the
+// PR's head: their lines may not match the local files otherwise.
+func (m *Model) applyPRContext(rc data.PRReviewContext) {
+	m.prId = rc.Id
+	m.headSha = rc.HeadSha
+	if l := m.pr.Local; l != nil {
+		m.prSynced = m.prId != "" && m.localHead == m.headSha && m.clean && !l.Uncommitted
+		if !m.prSynced {
+			return
+		}
+	}
+	m.threads = map[string][]data.PRReviewThread{}
+	for _, t := range rc.Threads {
+		if !t.IsOutdated {
+			m.threads[t.Path] = append(m.threads[t.Path], t)
+		}
+	}
 }
 
 func (m *Model) files0Lines() []diffLine {
@@ -346,7 +478,13 @@ func (m Model) updateNormal(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.startReply()
 	case "x":
 		m.deletePendingAtCursor()
+	case "u":
+		return m.toggleUncommitted()
 	case "S", "s":
+		if reason := m.cannotSubmit(); reason != "" {
+			m.status = reason
+			return m, nil
+		}
 		m.mode = modeSubmitChoice
 		m.status = ""
 	}
@@ -376,6 +514,16 @@ func (m Model) startExpand(n int) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if f.content != nil {
+		m.expandAt(i, n)
+		return m, nil
+	}
+	if l := m.pr.Local; l != nil {
+		lines, err := data.LocalFileLines(l.Dir, f.Filename)
+		f.content, f.contentErr = lines, err
+		if err != nil {
+			m.status = "Could not read the file: " + err.Error()
+			return m, nil
+		}
 		m.expandAt(i, n)
 		return m, nil
 	}
@@ -746,6 +894,22 @@ func (m Model) submit() (Model, tea.Cmd) {
 	prId, name := m.prId, ev.name
 	return m, func() tea.Msg {
 		return submittedMsg{err: data.SubmitPRReview(prId, name, body, comments)}
+	}
+}
+
+// cannotSubmit explains why a worktree review cannot be sent to GitHub:
+// its comments then stay as local notes.
+func (m *Model) cannotSubmit() string {
+	l := m.pr.Local
+	switch {
+	case l == nil || m.prSynced:
+		return ""
+	case m.pr.Number == 0:
+		return "No pull request for this branch: the comments stay as local notes"
+	case l.Uncommitted:
+		return fmt.Sprintf("Uncommitted changes only (u): the comments stay as local notes, review the branch to send them to #%d", m.pr.Number)
+	default:
+		return fmt.Sprintf("The worktree differs from #%d (uncommitted or unpushed changes): the comments stay as local notes", m.pr.Number)
 	}
 }
 

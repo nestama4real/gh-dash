@@ -75,15 +75,15 @@ func (m Model) View() string {
 	switch {
 	case m.loading:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			faint.Render(fmt.Sprintf("Loading the diff of #%d…", m.pr.Number)))
+			faint.Render("Loading the diff of "+m.subject()+"…"))
 	case m.err != nil:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
 			lipgloss.NewStyle().Foreground(m.ctx.Theme.ErrorText).
-				Render("Could not load the pull request: "+m.err.Error()+"\n\n")+
+				Render("Could not load "+m.subject()+": "+m.err.Error()+"\n\n")+
 				faint.Render("q to go back"))
 	case len(m.files) == 0:
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-			faint.Render("No changed file. q to go back"))
+			faint.Render(m.emptyText()))
 	}
 
 	m.clampOffset()
@@ -111,11 +111,27 @@ func (m *Model) renderHeader() string {
 	title := lipgloss.NewStyle().Bold(true).Foreground(theme.PrimaryText).
 		Render(fmt.Sprintf(" Review #%d ", m.pr.Number)) +
 		lipgloss.NewStyle().Foreground(theme.SecondaryText).Render(m.pr.Title)
+	if l := m.pr.Local; l != nil {
+		scope := "branch vs " + l.Base
+		if l.Uncommitted {
+			scope = "uncommitted changes"
+		}
+		title = lipgloss.NewStyle().Bold(true).Foreground(theme.PrimaryText).Render(" "+l.Branch+" ") +
+			lipgloss.NewStyle().Foreground(m.gh("BLUE")).Render(scope+" ") +
+			lipgloss.NewStyle().Foreground(theme.FaintText).Render("(u to switch)")
+		if m.pr.Number > 0 {
+			title += lipgloss.NewStyle().Foreground(theme.SecondaryText).Render(fmt.Sprintf("  #%d %s", m.pr.Number, m.pr.Title))
+		}
+	}
 	right := ""
 	if n := len(m.pending()); n > 0 {
 		right = lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Bold(true).
 			Render(fmt.Sprintf("%d pending comment%s ", n, plural(n))) +
 			lipgloss.NewStyle().Foreground(theme.FaintText).Render("· S to submit ")
+		if m.cannotSubmit() != "" {
+			right = lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Bold(true).
+				Render(fmt.Sprintf("%d local note%s ", n, plural(n)))
+		}
 	}
 	line1 := ansi.Truncate(title, max(1, m.width-ansi.StringWidth(right)-1), "…")
 	line1 += strings.Repeat(" ", max(1, m.width-ansi.StringWidth(line1)-ansi.StringWidth(right))) + right
@@ -351,7 +367,11 @@ func (m *Model) renderThread(t data.PRReviewThread, k int, width int) string {
 
 func (m *Model) renderDraft(d draft, width int) string {
 	faint := lipgloss.NewStyle().Foreground(m.ctx.Theme.FaintText)
-	left := lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Bold(true).Render("✎ Pending") +
+	label := "✎ Pending"
+	if m.cannotSubmit() != "" {
+		label = "✎ Local note"
+	}
+	left := lipgloss.NewStyle().Foreground(m.gh("YELLOW")).Bold(true).Render(label) +
 		faint.Render("  ·  "+rangeLabel(d.StartLine, d.Line))
 	right := faint.Render("c edit · x delete")
 	gap := max(1, width-4-ansi.StringWidth(left)-ansi.StringWidth(right))
@@ -582,6 +602,24 @@ func (m *Model) renderDiff() string {
 	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(strings.Join(out, "\n"))
 }
 
+func (m *Model) emptyText() string {
+	if l := m.pr.Local; l != nil {
+		if l.Uncommitted {
+			return "No uncommitted change. u to review the whole branch, q to go back"
+		}
+		return "No change since " + l.Base + ". q to go back"
+	}
+	return "No changed file. q to go back"
+}
+
+// subject names what is reviewed, for messages.
+func (m *Model) subject() string {
+	if l := m.pr.Local; l != nil {
+		return l.Branch
+	}
+	return fmt.Sprintf("#%d", m.pr.Number)
+}
+
 func (m *Model) renderHint() string {
 	faint := lipgloss.NewStyle().Foreground(m.ctx.Theme.FaintText)
 	var hint string
@@ -592,6 +630,12 @@ func (m *Model) renderHint() string {
 		hint = faint.Render("selecting lines: j/k extend • c comment the range • esc cancel")
 	default:
 		hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • r reply • x delete • e/z expand/fold • {/} hunk • [/] file • t files • S submit • q back")
+		if m.pr.Local != nil {
+			hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • x delete • e/z expand/fold • {/} hunk • [/] file • t files • u branch/uncommitted • S submit • q back")
+			if m.prSynced {
+				hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • r reply • x delete • e/z expand/fold • [/] file • t files • u branch/uncommitted • S submit • q back")
+			}
+		}
 		if f := m.currFile(); f != nil && len(f.lines) > 0 && f.lines[m.currLine()].kind == lineExpanded {
 			hint = faint.Render("unchanged line, not commentable • z fold this block • Z fold all")
 		}
