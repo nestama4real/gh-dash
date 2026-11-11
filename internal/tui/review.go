@@ -1,13 +1,17 @@
 package tui
 
 import (
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/dlvhdr/gh-dash/v4/internal/config"
 	"github.com/dlvhdr/gh-dash/v4/internal/data"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/common"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prrow"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/prssection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/reviewview"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tasks"
 )
 
 func (m *Model) reviewSize() (int, int) {
@@ -67,4 +71,20 @@ func (m *Model) updateReview(msg tea.Msg) (tea.Cmd, bool) {
 	review, cmd := m.review.Update(msg)
 	m.review = &review
 	return cmd, false
+}
+
+// reviewMyself requests a review of the selected PR from the current user.
+func (m *Model) reviewMyself(row data.RowData) tea.Cmd {
+	pr, ok := row.(*prrow.Data)
+	if !ok || pr == nil || pr.Primary == nil {
+		return m.notifyErr("Select a pull request first")
+	}
+	if m.ctx.User == "" {
+		return m.notifyErr("Your GitHub login is not known yet, try again in a moment")
+	}
+	if strings.EqualFold(pr.Primary.Author.Login, m.ctx.User) {
+		return m.notifyErr("You cannot review your own pull request")
+	}
+	sid := tasks.SectionIdentifier{Id: m.currSectionId, Type: prssection.SectionType}
+	return tasks.RequestPRReview(m.ctx, sid, pr.Primary, []string{m.ctx.User})
 }

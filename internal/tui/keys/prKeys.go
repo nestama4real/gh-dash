@@ -16,6 +16,7 @@ type PRKeyMap struct {
 	Assign               key.Binding
 	Unassign             key.Binding
 	RequestReview        key.Binding
+	ReviewMyself         key.Binding
 	Label                key.Binding
 	Comment              key.Binding
 	Diff                 key.Binding
@@ -56,6 +57,10 @@ var PRKeys = PRKeyMap{
 	RequestReview: key.NewBinding(
 		key.WithKeys("ctrl+r"),
 		key.WithHelp("ctrl+r", "request review"),
+	),
+	ReviewMyself: key.NewBinding(
+		key.WithKeys("ctrl+a"),
+		key.WithHelp("ctrl+a", "add me as reviewer"),
 	),
 	Label: key.NewBinding(
 		key.WithKeys("L"),
@@ -123,6 +128,7 @@ func PRFullHelp() []key.Binding {
 		PRKeys.Assign,
 		PRKeys.Unassign,
 		PRKeys.RequestReview,
+		PRKeys.ReviewMyself,
 		PRKeys.Label,
 		PRKeys.Comment,
 		PRKeys.Diff,
@@ -176,6 +182,8 @@ func rebindPRKeys(keys []config.Keybinding) error {
 			key = &PRKeys.Assign
 		case "requestReview":
 			key = &PRKeys.RequestReview
+		case "reviewMyself":
+			key = &PRKeys.ReviewMyself
 		case "unassign":
 			key = &PRKeys.Unassign
 		case "label":
