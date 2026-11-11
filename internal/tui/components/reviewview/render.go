@@ -148,7 +148,10 @@ func (m *Model) renderHeader() string {
 		lipgloss.NewStyle().Foreground(m.gh("GREEN")).Render(fmt.Sprintf("+%d", f.Additions)) + " " +
 		lipgloss.NewStyle().Foreground(m.gh("RED")).Render(fmt.Sprintf("-%d", f.Deletions)) +
 		lipgloss.NewStyle().Foreground(theme.FaintText).
-			Render(fmt.Sprintf("   file %d/%d", m.fileIdx+1, len(m.files)))
+			Render(fmt.Sprintf("   file %d/%d · %d/%d viewed", m.fileIdx+1, len(m.files), m.viewedCount(), len(m.files)))
+	if m.isViewed(f) {
+		line2 += "  " + lipgloss.NewStyle().Foreground(m.gh("GREEN")).Bold(true).Render("✓ Viewed")
+	}
 	rule := lipgloss.NewStyle().Foreground(theme.FaintBorder).Render(strings.Repeat("─", m.width))
 	return lipgloss.JoinVertical(lipgloss.Left, line1, ansi.Truncate(line2, m.width, "…"), rule)
 }
@@ -225,6 +228,10 @@ func (m *Model) renderTree(width int) string {
 		}
 		selected := r.file == m.fileIdx
 		nameStyle := lipgloss.NewStyle().Foreground(theme.PrimaryText)
+		if m.isViewed(&f) {
+			icon, color = "✓", "GREEN"
+			nameStyle = nameStyle.Foreground(theme.FaintText)
+		}
 		if selected {
 			nameStyle = nameStyle.Bold(true)
 		}
@@ -632,9 +639,9 @@ func (m *Model) renderHint() string {
 	case m.selFrom >= 0:
 		hint = faint.Render("selecting lines: j/k extend • c comment the range • esc cancel")
 	default:
-		hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • r reply • x delete • e/z expand/fold • {/} hunk • [/] file • t files • S submit • q back")
+		hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • r reply • x delete • e/z expand/fold • {/} hunk • [/] file • t files • m viewed • S submit • q back")
 		if m.pr.Local != nil {
-			hint = faint.Render("j/k line • shift+↑/↓ or v select • c note • x delete • e/z expand/fold • {/} hunk • [/] file • t files • u branch/uncommitted • C commits • S notes file • q back")
+			hint = faint.Render("j/k line • shift+↑/↓ or v select • c note • x delete • e/z expand/fold • {/} hunk • [/] file • t files • m viewed • u branch/uncommitted • C commits • S notes file • q back")
 		}
 		if f := m.currFile(); f != nil && len(f.lines) > 0 && f.lines[m.currLine()].kind == lineExpanded {
 			hint = faint.Render("unchanged line, not commentable • z fold this block • Z fold all")

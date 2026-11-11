@@ -107,7 +107,9 @@ type Model struct {
 	input    textarea.Model
 	eventIdx int
 	pickIdx  int
-	status   string
+	// viewed maps the files marked as viewed to their patch's hash.
+	viewed map[string]string
+	status string
 }
 
 // ClosedMsg is sent when the review mode is left. Submitted is true when a
@@ -133,6 +135,7 @@ func New(ctx *context.ProgramContext, pr PR, width, height int) (Model, tea.Cmd)
 		loading: true, cursor: map[int]int{}, selFrom: -1, editing: -1,
 		showTree: true,
 	}
+	m.viewed = data.LoadViewed(m.pendingKey())
 	cmd := m.load()
 	return m, cmd
 }
@@ -494,6 +497,8 @@ func (m Model) updateNormal(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		return m.startReply()
 	case "x":
 		m.deletePendingAtCursor()
+	case "m":
+		m.toggleViewed()
 	case "u":
 		return m.toggleUncommitted()
 	case "C":
@@ -920,6 +925,57 @@ func (m Model) submit() (Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		return submittedMsg{err: data.SubmitPRReview(prId, name, body, comments)}
 	}
+}
+
+func (m *Model) isViewed(f *fileDiff) bool {
+	h, ok := m.viewed[f.Filename]
+	return ok && h == data.PatchHash(f.Patch)
+}
+
+func (m *Model) viewedCount() int {
+	n := 0
+	for i := range m.files {
+		if m.isViewed(&m.files[i]) {
+			n++
+		}
+	}
+	return n
+}
+
+// toggleViewed marks the current file as viewed, or not, like GitHub's
+// checkbox; once viewed, the next file not viewed yet is shown.
+func (m *Model) toggleViewed() {
+	f := m.currFile()
+	if f == nil {
+		return
+	}
+	viewed := make(map[string]string, len(m.viewed)+1)
+	for k, v := range m.viewed {
+		viewed[k] = v
+	}
+	if m.isViewed(f) {
+		delete(viewed, f.Filename)
+		m.status = "Marked as not viewed"
+	} else {
+		viewed[f.Filename] = data.PatchHash(f.Patch)
+		m.status = "Marked as viewed"
+	}
+	m.viewed = viewed
+	if err := data.SaveViewed(m.pendingKey(), viewed); err != nil {
+		m.status = "Could not save: " + err.Error()
+	}
+	if !m.isViewed(f) {
+		return
+	}
+	// The tree order is the files' order.
+	for i := 1; i < len(m.files); i++ {
+		j := (m.fileIdx + i) % len(m.files)
+		if !m.isViewed(&m.files[j]) {
+			m.setFile(j)
+			return
+		}
+	}
+	m.status = "All files viewed"
 }
 
 // scopeChoice is an entry of the commit picker.
