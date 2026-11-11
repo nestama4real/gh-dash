@@ -631,10 +631,7 @@ func (m *Model) renderHint() string {
 	default:
 		hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • r reply • x delete • e/z expand/fold • {/} hunk • [/] file • t files • S submit • q back")
 		if m.pr.Local != nil {
-			hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • x delete • e/z expand/fold • {/} hunk • [/] file • t files • u branch/uncommitted • S submit • q back")
-			if m.prSynced {
-				hint = faint.Render("j/k line • shift+↑/↓ or v select • c comment • r reply • x delete • e/z expand/fold • [/] file • t files • u branch/uncommitted • S submit • q back")
-			}
+			hint = faint.Render("j/k line • shift+↑/↓ or v select • c note • x delete • e/z expand/fold • {/} hunk • [/] file • t files • u branch/uncommitted • C commits • S notes file • q back")
 		}
 		if f := m.currFile(); f != nil && len(f.lines) > 0 && f.lines[m.currLine()].kind == lineExpanded {
 			hint = faint.Render("unchanged line, not commentable • z fold this block • Z fold all")

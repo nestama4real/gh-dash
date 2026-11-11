@@ -3,11 +3,14 @@ package data
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+	"time"
 )
 
 // LocalDiffFiles is the diff of a worktree against base (a commit), working
@@ -120,43 +123,135 @@ func IsWorktreeClean(dir string) bool {
 	return err == nil && strings.TrimSpace(out) == ""
 }
 
-// Local review notes are kept on disk, per worktree branch.
-func notesPath(key string) string {
-	dir, err := os.UserCacheDir()
-	if err != nil {
-		dir = os.TempDir()
-	}
-	name := regexp.MustCompile(`[^A-Za-z0-9._-]+`).ReplaceAllString(key, "_")
-	return filepath.Join(dir, "gh-dash", "notes", name+".json")
+// LocalNote is a review comment on a worktree. Notes never leave the
+// machine: they are written as JSON for gh-dash and as Markdown for people
+// and coding agents, one file per branch.
+type LocalNote struct {
+	DraftReviewComment
+	Commit    string `json:",omitempty"` // empty: the working tree
+	Subject   string `json:",omitempty"` // of the commit
+	Excerpt   string `json:",omitempty"` // diff lines commented
+	CreatedAt time.Time
 }
 
-func LoadLocalNotes(key string) []DraftReviewComment {
-	b, err := os.ReadFile(notesPath(key))
+// NotesMeta describes the worktree the notes are about.
+type NotesMeta struct {
+	Repo, Branch, Dir, Base string
+}
+
+// NotesDir is where the notes are written: $XDG_DATA_HOME/gh-dash/notes
+// (~/.local/share/gh-dash/notes by default).
+func NotesDir() string {
+	base := os.Getenv("XDG_DATA_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			home = os.TempDir()
+		}
+		base = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(base, "gh-dash", "notes")
+}
+
+var unsafeNameRe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+
+// NotesFile is the Markdown file of a branch's notes; the JSON file sits
+// next to it.
+func NotesFile(repo, branch string) string {
+	return filepath.Join(NotesDir(), filepath.FromSlash(strings.ToLower(repo)),
+		unsafeNameRe.ReplaceAllString(branch, "_")+".md")
+}
+
+func notesJSON(repo, branch string) string {
+	return strings.TrimSuffix(NotesFile(repo, branch), ".md") + ".json"
+}
+
+func LoadLocalNotes(repo, branch string) []LocalNote {
+	b, err := os.ReadFile(notesJSON(repo, branch))
 	if err != nil {
 		return nil
 	}
-	var notes []DraftReviewComment
+	var notes []LocalNote
 	if json.Unmarshal(b, &notes) != nil {
 		return nil
 	}
 	return notes
 }
 
-func SaveLocalNotes(key string, notes []DraftReviewComment) error {
-	p := notesPath(key)
+// SaveLocalNotes writes the notes of a branch, or removes its files when
+// there is none left.
+func SaveLocalNotes(meta NotesMeta, notes []LocalNote) error {
+	md, js := NotesFile(meta.Repo, meta.Branch), notesJSON(meta.Repo, meta.Branch)
 	if len(notes) == 0 {
-		err := os.Remove(p)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
+		for _, p := range []string{md, js} {
+			if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
 		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(md), 0o755); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return err
-	}
-	b, err := json.Marshal(notes)
+	b, err := json.MarshalIndent(notes, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, b, 0o644)
+	if err := os.WriteFile(js, b, 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(md, []byte(RenderNotesMarkdown(meta, notes)), 0o644)
+}
+
+// RenderNotesMarkdown lists the notes by file and line, with the code they
+// are about, for a coding agent to act on.
+func RenderNotesMarkdown(meta NotesMeta, notes []LocalNote) string {
+	sorted := append([]LocalNote(nil), notes...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		a, b := sorted[i], sorted[j]
+		if a.Commit != b.Commit {
+			return a.Commit < b.Commit
+		}
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		return a.Line < b.Line
+	})
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Review notes: %s\n\n", meta.Branch)
+	fmt.Fprintf(&b, "- Repository: %s\n- Worktree: `%s`\n- Compared with: %s\n- Notes: %d\n\n",
+		meta.Repo, meta.Dir, meta.Base, len(notes))
+	b.WriteString("Line numbers refer to the new version of the file (`+` and unchanged lines) " +
+		"or to the old one for removed lines (`-`). Notes on a commit refer to the files as of that commit.\n")
+	for i, n := range sorted {
+		where := fmt.Sprintf("%s:%d", n.Path, n.Line)
+		if n.StartLine > 0 && n.StartLine != n.Line {
+			where = fmt.Sprintf("%s:%d-%d", n.Path, n.StartLine, n.Line)
+		}
+		if n.Side == "LEFT" {
+			where += " (removed lines)"
+		}
+		fmt.Fprintf(&b, "\n## %d. `%s`\n\n", i+1, where)
+		if n.Commit != "" {
+			fmt.Fprintf(&b, "On commit %s", n.Commit)
+			if n.Subject != "" {
+				fmt.Fprintf(&b, " (%s)", n.Subject)
+			}
+			b.WriteString("\n\n")
+		}
+		if n.Excerpt != "" {
+			b.WriteString("```diff\n" + strings.TrimRight(n.Excerpt, "\n") + "\n```\n\n")
+		}
+		b.WriteString(strings.TrimSpace(n.Body) + "\n")
+	}
+	return b.String()
+}
+
+// CommitDiffFiles is the diff of one commit, split by file.
+func CommitDiffFiles(dir, sha string) ([]PRFile, error) {
+	out, err := git(dir, "show", "--format=", "--no-color", "--no-ext-diff", "-M", "-U3", sha)
+	if err != nil {
+		return nil, err
+	}
+	return parseGitDiff(out), nil
 }

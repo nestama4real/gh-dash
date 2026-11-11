@@ -6,6 +6,7 @@ package reviewview
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -38,7 +39,7 @@ type PR struct {
 	Local *Local
 }
 
-// Local is a worktree under review.
+// Local is a worktree under review. Its comments are local notes.
 type Local struct {
 	Dir       string
 	Branch    string
@@ -47,18 +48,19 @@ type Local struct {
 	// Uncommitted reviews the uncommitted changes only (diff against HEAD)
 	// instead of the whole branch since the merge base.
 	Uncommitted bool
+	// Commit reviews a single commit instead, when set.
+	Commit, Subject string
+	Commits         []data.WorktreeCommit
 }
 
-func (l *Local) diffBase() string {
-	if l.Uncommitted {
-		return "HEAD"
-	}
-	return l.MergeBase
+func (l *Local) meta() data.NotesMeta {
+	return data.NotesMeta{Repo: "", Branch: l.Branch, Dir: l.Dir, Base: l.Base}
 }
 
-// draft is a pending comment, kept until the review is submitted.
+// draft is a pending comment, kept until the review is submitted. For a
+// worktree, it is a local note and never leaves the machine.
 type draft struct {
-	data.DraftReviewComment
+	data.LocalNote
 }
 
 // Pending comments survive leaving and reopening the review mode.
@@ -95,13 +97,8 @@ type Model struct {
 	// with the next plain move.
 	selByShift bool
 	headSha    string
-	// prSynced is true for a worktree whose checkout is exactly the head of
-	// its pull request: the review and the conversations then apply to it.
-	prSynced bool
 	// loadSeq numbers the loads of a worktree, to drop stale results.
-	loadSeq   int
-	localHead string
-	clean     bool
+	loadSeq int
 
 	mode     mode
 	editing  int // index of the pending comment being edited, -1 for a new one
@@ -121,16 +118,7 @@ type loadedMsg struct {
 	files   []data.PRFile
 	context data.PRReviewContext
 	err     error
-	// for a worktree
-	localHead string
-	clean     bool
-	seq       int
-}
-
-// prContextMsg brings the pull request of a worktree, after its diff.
-type prContextMsg struct {
-	context data.PRReviewContext
-	seq     int
+	seq     int // for a worktree
 }
 
 type submittedMsg struct {
@@ -151,20 +139,21 @@ func (m *Model) load() tea.Cmd {
 	repo, number := m.pr.Repo, m.pr.Number
 	if l := m.pr.Local; l != nil {
 		m.loadSeq++
-		dir, base, seq := l.Dir, l.diffBase(), m.loadSeq
-		cmds := []tea.Cmd{func() tea.Msg {
-			files, err := data.LocalDiffFiles(dir, base)
-			return loadedMsg{files: files, err: err, seq: seq,
-				localHead: data.HeadSha(dir), clean: data.IsWorktreeClean(dir)}
-		}}
-		if number > 0 {
-			cmds = append(cmds, func() tea.Msg {
-				// Without GitHub, the notes simply stay local.
-				rc, _ := data.FetchPRReviewContext(repo, number)
-				return prContextMsg{context: rc, seq: seq}
-			})
+		dir, seq := l.Dir, m.loadSeq
+		commit, base := l.Commit, l.MergeBase
+		if l.Uncommitted {
+			base = "HEAD"
 		}
-		return tea.Sequence(cmds...)
+		return func() tea.Msg {
+			var files []data.PRFile
+			var err error
+			if commit != "" {
+				files, err = data.CommitDiffFiles(dir, commit)
+			} else {
+				files, err = data.LocalDiffFiles(dir, base)
+			}
+			return loadedMsg{files: files, err: err, seq: seq}
+		}
 	}
 	return func() tea.Msg {
 		files, err := data.FetchPRFiles(repo, number)
@@ -194,7 +183,8 @@ func (m Model) toggleUncommitted() (Model, tea.Cmd) {
 	l := *m.pr.Local
 	l.Uncommitted = !l.Uncommitted
 	m.pr.Local = &l
-	m.loading, m.err, m.prSynced = true, nil, false
+	l.Commit, l.Subject = "", ""
+	m.loading, m.err = true, nil
 	m.files, m.tree, m.threads = nil, nil, nil
 	m.fileIdx, m.offset = 0, 0
 	m.cursor = map[int]int{}
@@ -209,29 +199,63 @@ func (m *Model) SetSize(width, height int) {
 	m.clampOffset()
 }
 
-func (m *Model) pending() []draft {
+// allPending is every pending comment; for a worktree, the notes of all
+// its diffs (whole branch and single commits).
+func (m *Model) allPending() []draft {
 	key := m.pendingKey()
 	p, ok := pendingByPR[key]
 	if !ok && m.pr.Local != nil {
-		for _, c := range data.LoadLocalNotes(key) {
-			p = append(p, draft{c})
+		for _, n := range data.LoadLocalNotes(m.pr.Repo, m.pr.Local.Branch) {
+			p = append(p, draft{n})
 		}
 		pendingByPR[key] = p
 	}
 	return p
 }
 
+// pending is the comments of the diff shown: a worktree's notes are tied to
+// the working tree or to one commit.
+func (m *Model) pending() []draft {
+	all := m.allPending()
+	l := m.pr.Local
+	if l == nil {
+		return all
+	}
+	var p []draft
+	for _, d := range all {
+		if d.Commit == l.Commit {
+			p = append(p, d)
+		}
+	}
+	return p
+}
+
 func (m *Model) setPending(p []draft) {
 	key := m.pendingKey()
-	pendingByPR[key] = p
-	if m.pr.Local != nil {
-		notes := make([]data.DraftReviewComment, 0, len(p))
-		for _, d := range p {
-			notes = append(notes, d.DraftReviewComment)
+	l := m.pr.Local
+	if l == nil {
+		pendingByPR[key] = p
+		return
+	}
+	var all []draft
+	for _, d := range m.allPending() {
+		if d.Commit != l.Commit {
+			all = append(all, d)
 		}
-		if err := data.SaveLocalNotes(key, notes); err != nil {
-			m.status = "Could not save the notes: " + err.Error()
-		}
+	}
+	for _, d := range p {
+		d.Commit, d.Subject = l.Commit, l.Subject
+		all = append(all, d)
+	}
+	pendingByPR[key] = all
+	notes := make([]data.LocalNote, 0, len(all))
+	for _, d := range all {
+		notes = append(notes, d.LocalNote)
+	}
+	meta := l.meta()
+	meta.Repo = m.pr.Repo
+	if err := data.SaveLocalNotes(meta, notes); err != nil {
+		m.status = "Could not save the notes: " + err.Error()
 	}
 }
 
@@ -282,13 +306,6 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case prContextMsg:
-		if msg.seq != m.loadSeq || m.loading {
-			return m, nil
-		}
-		m.applyPRContext(msg.context)
-		return m, nil
-
 	case loadedMsg:
 		if m.pr.Local != nil && msg.seq != m.loadSeq {
 			return m, nil
@@ -298,7 +315,6 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		m.localHead, m.clean = msg.localHead, msg.clean
 		m.threads = map[string][]data.PRReviewThread{}
 		if m.pr.Local == nil {
 			m.applyPRContext(msg.context)
@@ -378,18 +394,10 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// applyPRContext keeps what the review of the pull request needs. For a
-// worktree, the conversations are only shown when it is checked out at the
-// PR's head: their lines may not match the local files otherwise.
+// applyPRContext keeps what the review of the pull request needs.
 func (m *Model) applyPRContext(rc data.PRReviewContext) {
 	m.prId = rc.Id
 	m.headSha = rc.HeadSha
-	if l := m.pr.Local; l != nil {
-		m.prSynced = m.prId != "" && m.localHead == m.headSha && m.clean && !l.Uncommitted
-		if !m.prSynced {
-			return
-		}
-	}
 	m.threads = map[string][]data.PRReviewThread{}
 	for _, t := range rc.Threads {
 		if !t.IsOutdated {
@@ -812,7 +820,11 @@ func (m *Model) saveDraft(body string) {
 	}
 	from, to := m.selection()
 	side, line := f.lines[to].position()
-	d := draft{data.DraftReviewComment{Path: f.Filename, Line: line, Side: side, Body: body}}
+	d := draft{data.LocalNote{
+		DraftReviewComment: data.DraftReviewComment{Path: f.Filename, Line: line, Side: side, Body: body},
+		Excerpt:            f.excerpt(from, to),
+		CreatedAt:          time.Now(),
+	}}
 	// A range starts on its first commentable line.
 	for i := from; i < to; i++ {
 		if f.lines[i].commentable() {
@@ -900,17 +912,18 @@ func (m Model) submit() (Model, tea.Cmd) {
 // cannotSubmit explains why a worktree review cannot be sent to GitHub:
 // its comments then stay as local notes.
 func (m *Model) cannotSubmit() string {
-	l := m.pr.Local
-	switch {
-	case l == nil || m.prSynced:
+	if m.pr.Local == nil {
 		return ""
-	case m.pr.Number == 0:
-		return "No pull request for this branch: the comments stay as local notes"
-	case l.Uncommitted:
-		return fmt.Sprintf("Uncommitted changes only (u): the comments stay as local notes, review the branch to send them to #%d", m.pr.Number)
-	default:
-		return fmt.Sprintf("The worktree differs from #%d (uncommitted or unpushed changes): the comments stay as local notes", m.pr.Number)
 	}
+	return "Local notes, never sent: " + m.NotesFile()
+}
+
+// NotesFile is the Markdown file of a worktree's notes.
+func (m *Model) NotesFile() string {
+	if m.pr.Local == nil {
+		return ""
+	}
+	return data.NotesFile(m.pr.Repo, m.pr.Local.Branch)
 }
 
 // IsTyping reports whether keys go to a text input.

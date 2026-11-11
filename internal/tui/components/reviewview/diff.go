@@ -227,3 +227,20 @@ func parsePatch(patch string) ([]diffLine, int) {
 	}
 	return lines, oldNo - newNo
 }
+
+// excerpt is the diff lines from..to, as in a unified diff.
+func (f *fileDiff) excerpt(from, to int) string {
+	var b strings.Builder
+	for i := max(0, from); i <= to && i < len(f.lines); i++ {
+		l := f.lines[i]
+		switch l.kind {
+		case lineAdd:
+			b.WriteString("+" + l.text + "\n")
+		case lineDel:
+			b.WriteString("-" + l.text + "\n")
+		case lineContext, lineExpanded:
+			b.WriteString(" " + l.text + "\n")
+		}
+	}
+	return b.String()
+}

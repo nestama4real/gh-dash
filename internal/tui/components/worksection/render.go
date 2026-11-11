@@ -179,6 +179,11 @@ func RenderPreview(ctx *context.ProgramContext, w *data.Worktree, width int) str
 			projectValue(ctx, w, sb.GetEstimateField()))
 	}
 
+	if notes := data.LoadLocalNotes(w.Repo, w.GetTitle()); len(notes) > 0 {
+		line(st.warn.Render(fmt.Sprintf("✎ %d local note%s", len(notes), map[bool]string{true: "s"}[len(notes) > 1])) +
+			" " + st.faint.Render(trunc(data.NotesFile(w.Repo, w.GetTitle()), width-16)))
+	}
+
 	b.WriteString("\n")
 	line(head.Render(fmt.Sprintf("Files changed (%d)", len(w.Files))) + "  " +
 		st.add.Render(fmt.Sprintf("+%d", w.Additions)) + " " + st.del.Render(fmt.Sprintf("−%d", w.Deletions)))
