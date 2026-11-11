@@ -370,6 +370,12 @@ func (m *Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 
+		case m.ctx.View != config.NotificationsView && key.Matches(msg, m.keys.NextView):
+			return m, m.switchView(1)
+
+		case m.ctx.View != config.NotificationsView && key.Matches(msg, m.keys.PrevView):
+			return m, m.switchView(-1)
+
 		case key.Matches(msg, m.keys.Refresh):
 			if currSection != nil {
 				data.ClearEnrichmentCache()
@@ -1723,6 +1729,11 @@ func (m *Model) updateTabs() {
 }
 
 func (m *Model) switchSelectedView() tea.Cmd {
+	return m.switchView(1)
+}
+
+// switchView goes to the next (dir 1) or previous (dir -1) view.
+func (m *Model) switchView(dir int) tea.Cmd {
 	// Reset notification subject when leaving notifications view
 	if m.ctx.View == config.NotificationsView {
 		keys.SetNotificationSubject(keys.NotificationSubjectNone)
@@ -1730,7 +1741,7 @@ func (m *Model) switchSelectedView() tea.Cmd {
 	}
 
 	prevView := m.ctx.View
-	m.ctx.View = m.nextView()
+	m.ctx.View = m.nextView(dir)
 	if m.ctx.View == config.BoardView {
 		m.previewBeforeBoard = m.sidebar.IsOpen
 		m.sidebar.IsOpen = false

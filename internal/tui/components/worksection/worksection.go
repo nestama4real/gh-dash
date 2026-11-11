@@ -243,9 +243,3 @@ func (m *Model) GetPagerContent() string {
 	return fmt.Sprintf("%v %v • Worktree %v/%v", constants.WaitingIcon,
 		m.LastUpdated().Format("01/02 15:04:05"), m.Table.GetCurrItem()+1, m.TotalCount)
 }
-
-// IsDataStale: worktrees change outside of gh-dash, read them again each
-// time the view is shown if older than a few seconds.
-func (m *Model) IsDataStale() bool {
-	return time.Since(m.LastFetch.At) > 5*time.Second
-}

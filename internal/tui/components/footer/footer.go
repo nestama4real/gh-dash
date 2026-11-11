@@ -191,15 +191,15 @@ func (m *Model) renderViewSwitcher(ctx *context.ProgramContext) string {
 	} else {
 		buttons = append(buttons, ctx.Styles.ViewSwitcher.ViewsSeparator.Render(" "))
 	}
+	if ctx.Config != nil && ctx.Config.HasScrumBoard() {
+		buttons = append(buttons,
+			m.renderViewButton(config.BoardView),
+			ctx.Styles.ViewSwitcher.ViewsSeparator.Render(viewSeparator))
+	}
 	buttons = append(buttons,
 		m.renderViewButton(config.PRsView),
 		ctx.Styles.ViewSwitcher.ViewsSeparator.Render(viewSeparator),
 		m.renderViewButton(config.IssuesView))
-	if ctx.Config != nil && ctx.Config.HasScrumBoard() {
-		buttons = append(buttons,
-			ctx.Styles.ViewSwitcher.ViewsSeparator.Render(viewSeparator),
-			m.renderViewButton(config.BoardView))
-	}
 	if ctx.Config != nil && ctx.Config.HasWork() {
 		buttons = append(buttons,
 			ctx.Styles.ViewSwitcher.ViewsSeparator.Render(viewSeparator),

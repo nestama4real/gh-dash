@@ -38,6 +38,8 @@ type KeyMap struct {
 	OpenGithub            key.Binding
 	Refresh               key.Binding
 	RefreshAll            key.Binding
+	NextView              key.Binding
+	PrevView              key.Binding
 	Redraw                key.Binding
 	PageDown              key.Binding
 	PageUp                key.Binding
@@ -136,6 +138,8 @@ func (k KeyMap) AppKeys() []key.Binding {
 	return []key.Binding{
 		k.Refresh,
 		k.RefreshAll,
+		k.NextView,
+		k.PrevView,
 		k.TogglePreview,
 		k.TogglePreviewPosition,
 		k.OpenGithub,
@@ -188,6 +192,14 @@ var Keys = &KeyMap{
 	RefreshAll: key.NewBinding(
 		key.WithKeys("R"),
 		key.WithHelp("R", "refresh all"),
+	),
+	NextView: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "next view"),
+	),
+	PrevView: key.NewBinding(
+		key.WithKeys("S"),
+		key.WithHelp("S", "previous view"),
 	),
 	PageDown: key.NewBinding(
 		key.WithKeys("ctrl+d"),

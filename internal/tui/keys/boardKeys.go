@@ -80,6 +80,5 @@ func BoardFullHelp() []key.Binding {
 		IssueKeys.Comment,
 		IssueKeys.Close,
 		IssueKeys.Reopen,
-		IssueKeys.ViewPRs,
 	}
 }

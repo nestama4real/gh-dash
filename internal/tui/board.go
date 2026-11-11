@@ -15,10 +15,11 @@ import (
 
 // enabledViews lists the views reachable with the view switcher, in order.
 func (m *Model) enabledViews() []config.ViewType {
-	views := []config.ViewType{config.PRsView, config.IssuesView}
+	var views []config.ViewType
 	if m.ctx.Config.HasScrumBoard() {
 		views = append(views, config.BoardView)
 	}
+	views = append(views, config.PRsView, config.IssuesView)
 	if m.ctx.Config.HasWork() {
 		views = append(views, config.WorkView)
 	}
@@ -31,11 +32,15 @@ func (m *Model) enabledViews() []config.ViewType {
 	return views
 }
 
-func (m *Model) nextView() config.ViewType {
+func (m *Model) nextView(dir int) config.ViewType {
+	if m.ctx.View == config.NotificationsView && dir > 0 {
+		// As upstream: notifications lead to the PRs.
+		return config.PRsView
+	}
 	views := m.enabledViews()
 	for i, v := range views {
 		if v == m.ctx.View {
-			return views[(i+1)%len(views)]
+			return views[(i+dir+len(views))%len(views)]
 		}
 	}
 	return views[0]
