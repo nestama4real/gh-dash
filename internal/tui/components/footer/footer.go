@@ -138,6 +138,9 @@ func (m *Model) renderViewButton(view config.ViewType) string {
 	case config.BoardView:
 		icon = "\U000f0821"
 		label = " " + m.ctx.Config.ScrumBoard.GetTitle()
+	case config.WorkView:
+		icon = "\uf418" // nf-oct-git_branch
+		label = " " + m.ctx.Config.Work.GetTitle()
 	}
 
 	if isActive {
@@ -196,6 +199,11 @@ func (m *Model) renderViewSwitcher(ctx *context.ProgramContext) string {
 		buttons = append(buttons,
 			ctx.Styles.ViewSwitcher.ViewsSeparator.Render(viewSeparator),
 			m.renderViewButton(config.BoardView))
+	}
+	if ctx.Config != nil && ctx.Config.HasWork() {
+		buttons = append(buttons,
+			ctx.Styles.ViewSwitcher.ViewsSeparator.Render(viewSeparator),
+			m.renderViewButton(config.WorkView))
 	}
 
 	view := lipgloss.JoinHorizontal(

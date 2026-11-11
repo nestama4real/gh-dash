@@ -45,6 +45,7 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/sidebar"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tabs"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/tasks"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/worksection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/constants"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/context"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/images"
@@ -67,6 +68,7 @@ type Model struct {
 	issues           []section.Section
 	notifications    []section.Section
 	board            []section.Section
+	work             []section.Section
 	boardStore       *boardsection.Store
 	tabs             tabs.Model
 	ctx              *context.ProgramContext
@@ -549,6 +551,11 @@ func (m *Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case m.ctx.View == config.BoardView:
 			if boardCmd, handled := m.handleBoardKey(msg, currSection, currRowData); handled {
 				return m, boardCmd
+			}
+
+		case m.ctx.View == config.WorkView:
+			if workCmd, handled := m.handleWorkKey(msg, currRowData); handled {
+				return m, workCmd
 			}
 
 		case m.ctx.View == config.IssuesView:
@@ -1257,6 +1264,11 @@ func (m *Model) updateSection(id int, sType string, msg tea.Msg) (cmd tea.Cmd) {
 			updatedSection, cmd = m.board[id].Update(msg)
 			m.board[id] = updatedSection
 		}
+	case worksection.SectionType:
+		if id < len(m.work) {
+			updatedSection, cmd = m.work[id].Update(msg)
+			m.work[id] = updatedSection
+		}
 	}
 
 	currSection := m.getCurrSection()
@@ -1420,6 +1432,8 @@ func (m *Model) syncSidebar() tea.Cmd {
 		if m.prView.IsTextInputBoxFocused() {
 			m.sidebar.ScrollToBottom()
 		}
+	case *data.Worktree:
+		m.sidebar.SetContent(worksection.RenderPreview(m.ctx, row, width))
 	case *data.IssueData:
 		m.issueSidebar.SetSectionId(m.currSectionId)
 		if m.ctx.View == config.BoardView {
@@ -1670,6 +1684,9 @@ func (m *Model) fetchAllViewSections() tea.Cmd {
 	case config.BoardView:
 		cmds = append(cmds, boardsection.Fetch(m.ctx, m.boardStore, m.currSectionId))
 		return tea.Batch(cmds...)
+	case config.WorkView:
+		cmds = append(cmds, worksection.FetchAllSections(m.ctx, m.work))
+		return tea.Batch(cmds...)
 	default:
 		issuecmds := issuessection.FetchAllSections(m.ctx, m.issues)
 		cmds = append(cmds, issuecmds)
@@ -1693,6 +1710,8 @@ func (m *Model) getCurrentViewSections() []section.Section {
 		return m.prs
 	case config.BoardView:
 		return m.board
+	case config.WorkView:
+		return m.work
 	default:
 		return m.issues
 	}
@@ -2049,6 +2068,9 @@ func (m *Model) initSections() {
 	m.prs = prssection.InitSections(m.ctx)
 	m.issues = issuessection.InitSections(m.ctx)
 	m.notifications = notificationssection.InitSections(m.ctx)
+	if m.ctx.Config.HasWork() {
+		m.work = worksection.InitSections(m.ctx)
+	}
 	if m.ctx.Config.HasScrumBoard() {
 		m.boardStore.LoadCache(m.ctx.Config)
 		m.board = boardsection.InitSections(m.ctx, m.boardStore)

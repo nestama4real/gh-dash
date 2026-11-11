@@ -80,6 +80,8 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	case config.BoardView:
 		additionalKeys = BoardFullHelp()
 		customKeys = append(customKeys, CustomIssueBindings...)
+	case config.WorkView:
+		additionalKeys = WorkFullHelp()
 	case config.RepoView:
 		additionalKeys = BranchFullHelp()
 		customKeys = append(customKeys, CustomBranchBindings...)

@@ -21,6 +21,7 @@ var (
 		sprintField   string
 		// prs linked to an issue, keyed like items, valued by the issues' keys
 		linkedPRs map[string][]string
+		titles    map[string]string
 	}{}
 )
 
@@ -35,6 +36,7 @@ func SetProjectIndex(p *ProjectData, statusField string) {
 	items := map[string]map[string]ProjectFieldValue{}
 	linked := map[string][]string{}
 	fields := map[string]ProjectField{}
+	titles := map[string]string{}
 	var current *float64
 	sprintField := ""
 	if p != nil {
@@ -52,6 +54,7 @@ func SetProjectIndex(p *ProjectData, statusField string) {
 				values[k] = v
 			}
 			items[key] = values
+			titles[key] = it.Content.Title
 			for _, pr := range it.Content.ClosedByPullRequestsReferences.Nodes {
 				prKey := prKeyFromUrl(pr.Url, pr.Number)
 				linked[prKey] = append(linked[prKey], key)
@@ -86,6 +89,15 @@ func SetProjectIndex(p *ProjectData, statusField string) {
 	projectIndex.currentSprint = current
 	projectIndex.sprintField = sprintField
 	projectIndex.linkedPRs = linked
+	projectIndex.titles = titles
+}
+
+// LookupProjectTitle returns the title of an item of the indexed project.
+func LookupProjectTitle(repoNameWithOwner string, number int) (string, bool) {
+	projectIndexMu.RLock()
+	defer projectIndexMu.RUnlock()
+	t, ok := projectIndex.titles[indexKey(repoNameWithOwner, number)]
+	return t, ok
 }
 
 // prKeyFromUrl turns https://github.com/owner/repo/pull/12 into owner/repo#12.

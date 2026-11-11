@@ -9,6 +9,7 @@ import (
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/boardsection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/issuessection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/section"
+	"github.com/dlvhdr/gh-dash/v4/internal/tui/components/worksection"
 	"github.com/dlvhdr/gh-dash/v4/internal/tui/keys"
 )
 
@@ -17,6 +18,9 @@ func (m *Model) enabledViews() []config.ViewType {
 	views := []config.ViewType{config.PRsView, config.IssuesView}
 	if m.ctx.Config.HasScrumBoard() {
 		views = append(views, config.BoardView)
+	}
+	if m.ctx.Config.HasWork() {
+		views = append(views, config.WorkView)
 	}
 	if config.IsFeatureEnabled(config.FF_REPO_VIEW) {
 		views = append(views, config.RepoView)
@@ -83,6 +87,11 @@ func (m *Model) refreshIssueRows() {
 	for _, s := range m.issues {
 		if is, ok := s.(*issuessection.Model); ok {
 			is.RefreshRows()
+		}
+	}
+	for _, s := range m.work {
+		if ws, ok := s.(*worksection.Model); ok {
+			ws.RefreshRows()
 		}
 	}
 }

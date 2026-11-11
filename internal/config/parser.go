@@ -69,6 +69,8 @@ func (a *ViewType) UnmarshalJSON(b []byte) error {
 		*a = RepoView
 	case "board":
 		*a = BoardView
+	case "work":
+		*a = WorkView
 	}
 
 	return nil
@@ -80,7 +82,36 @@ const (
 	IssuesView        ViewType = "issues"
 	RepoView          ViewType = "repo"
 	BoardView         ViewType = "board"
+	WorkView          ViewType = "work"
 )
+
+// WorkConfig points the "Current Work" view at a local clone: its git
+// worktrees are listed like pull requests.
+type WorkConfig struct {
+	Repo  string `yaml:"repo"`
+	Base  string `yaml:"base,omitempty"` // default: origin's default branch
+	Title string `yaml:"title,omitempty"`
+}
+
+func (c *WorkConfig) GetTitle() string {
+	if c == nil || c.Title == "" {
+		return "Work"
+	}
+	return c.Title
+}
+
+// RepoDir is Repo with ~ expanded.
+func (c *WorkConfig) RepoDir() string {
+	if c == nil {
+		return ""
+	}
+	if strings.HasPrefix(c.Repo, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, c.Repo[2:])
+		}
+	}
+	return c.Repo
+}
 
 // ScrumBoardConfig points gh-dash at a GitHub Project (v2) rendered as a
 // kanban board. Tabs are read from the project's own views.
@@ -397,6 +428,7 @@ type Config struct {
 	ScrumBoard               *ScrumBoardConfig            `yaml:"scrumBoard,omitempty"`
 	HideNotifications        bool                         `yaml:"hideNotifications,omitempty"`
 	Images                   ImagesConfig                 `yaml:"images,omitempty"`
+	Work                     *WorkConfig                  `yaml:"work,omitempty"`
 }
 
 // ImagesConfig controls the images shown inline in descriptions and
@@ -409,6 +441,10 @@ type ImagesConfig struct {
 
 func (c ImagesConfig) IsEnabled() bool {
 	return c.Enabled == nil || *c.Enabled
+}
+
+func (cfg *Config) HasWork() bool {
+	return cfg != nil && cfg.Work != nil && cfg.Work.Repo != ""
 }
 
 func (cfg *Config) HasScrumBoard() bool {
@@ -960,6 +996,9 @@ func (parser ConfigParser) unmarshalConfigWithDefaults() (Config, error) {
 	}
 	if cfg.Defaults.View == BoardView && !cfg.HasScrumBoard() {
 		cfg.Defaults.View = IssuesView
+	}
+	if cfg.Defaults.View == WorkView && !cfg.HasWork() {
+		cfg.Defaults.View = PRsView
 	}
 	if cfg.Defaults.View == NotificationsView && cfg.HideNotifications {
 		cfg.Defaults.View = PRsView

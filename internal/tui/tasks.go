@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -15,7 +14,18 @@ import (
 )
 
 func (m *Model) openBrowser() tea.Cmd {
-	taskId := fmt.Sprintf("open_browser_%d", time.Now().Unix())
+	// Read the selection now, on the UI goroutine: sections must not be
+	// touched from the command's goroutine (the board rebuilds its columns
+	// when queried, which raced with rendering and crashed the app).
+	currRow := m.getCurrRowData()
+	if currRow == nil || reflect.ValueOf(currRow).IsNil() {
+		return m.notifyErr("current selection doesn't have a URL")
+	}
+	return m.openUrl(currRow.GetUrl())
+}
+
+func (m *Model) openUrl(url string) tea.Cmd {
+	taskId := fmt.Sprintf("open_browser_%d", time.Now().UnixNano())
 	task := context.Task{
 		Id:           taskId,
 		StartText:    "Opening in browser",
@@ -24,22 +34,12 @@ func (m *Model) openBrowser() tea.Cmd {
 		Error:        nil,
 	}
 	startCmd := m.ctx.StartTask(task)
-	// Read the selection now, on the UI goroutine: sections must not be
-	// touched from the command's goroutine (the board rebuilds its columns
-	// when queried, which raced with rendering and crashed the app).
-	currRow := m.getCurrRowData()
 	openCmd := func() tea.Msg {
 		// Discard the launcher's stdout/stderr so any noise (e.g. GTK / GVFS
 		// warnings from xdg-open / gnome-open) does not leak into the TUI's
 		// terminal and corrupt the display. See #829, #584, #679.
 		b := browser.New("", io.Discard, io.Discard)
-		if currRow == nil || reflect.ValueOf(currRow).IsNil() {
-			return constants.TaskFinishedMsg{
-				TaskId: taskId,
-				Err:    errors.New("current selection doesn't have a URL"),
-			}
-		}
-		err := b.Browse(currRow.GetUrl())
+		err := b.Browse(url)
 		return constants.TaskFinishedMsg{TaskId: taskId, Err: err}
 	}
 	return tea.Batch(startCmd, openCmd)
