@@ -255,3 +255,12 @@ func CommitDiffFiles(dir, sha string) ([]PRFile, error) {
 	}
 	return parseGitDiff(out), nil
 }
+
+// CommitFileLines reads a file as of a commit.
+func CommitFileLines(dir, sha, path string) ([]string, error) {
+	out, err := git(dir, "show", sha+":"+path)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(strings.TrimSuffix(out, "\n"), "\n"), nil
+}

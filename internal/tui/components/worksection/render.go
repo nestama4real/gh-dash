@@ -203,7 +203,8 @@ func RenderPreview(ctx *context.ProgramContext, w *data.Worktree, width int) str
 	}
 
 	b.WriteString("\n")
-	line(head.Render(fmt.Sprintf("Commits (%d)", len(w.Commits))))
+	line(head.Render(fmt.Sprintf("Commits (%d)", len(w.Commits))) + "  " +
+		st.faint.Render("d all changes · C pick a commit"))
 	if len(w.Commits) == 0 {
 		line(st.faint.Render("No commit since " + w.Base))
 	}

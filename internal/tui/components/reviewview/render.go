@@ -116,9 +116,12 @@ func (m *Model) renderHeader() string {
 		if l.Uncommitted {
 			scope = "uncommitted changes"
 		}
+		if l.Commit != "" {
+			scope = "commit " + l.Commit + " " + l.Subject
+		}
 		title = lipgloss.NewStyle().Bold(true).Foreground(theme.PrimaryText).Render(" "+l.Branch+" ") +
 			lipgloss.NewStyle().Foreground(m.gh("BLUE")).Render(scope+" ") +
-			lipgloss.NewStyle().Foreground(theme.FaintText).Render("(u to switch)")
+			lipgloss.NewStyle().Foreground(theme.FaintText).Render("(C commits)")
 		if m.pr.Number > 0 {
 			title += lipgloss.NewStyle().Foreground(theme.SecondaryText).Render(fmt.Sprintf("  #%d %s", m.pr.Number, m.pr.Title))
 		}
@@ -663,6 +666,31 @@ func (m *Model) renderDialog() string {
 		}
 		return box.Render(bold.Render("Comment on ") + faint.Render(ansi.Truncate(where, m.inputWidth()-12, "…")) +
 			"\n\n" + m.input.View() + "\n\n" + faint.Render("ctrl+s save • esc cancel"))
+
+	case modePickCommit:
+		lines := []string{bold.Render("Show the changes of"), ""}
+		choices := m.scopeChoices()
+		w := min(m.width-10, 90)
+		// Keep the selection visible in a long history.
+		maxRows := max(3, (m.height-10)/1)
+		start := max(0, min(m.pickIdx-maxRows/2, len(choices)-maxRows))
+		for i := start; i < len(choices) && i < start+maxRows; i++ {
+			c := choices[i]
+			radio, label := "○", lipgloss.NewStyle().Foreground(theme.SecondaryText).Render(ansi.Truncate(c.label, w, "…"))
+			if i == m.pickIdx {
+				radio, label = "●", bold.Render(ansi.Truncate(c.label, w, "…"))
+			}
+			if i == 2 {
+				lines = append(lines, faint.Render("Commits, newest first"))
+			}
+			line := radio + " " + label
+			if c.commit == "" {
+				line += "  " + faint.Render(c.hint)
+			}
+			lines = append(lines, line)
+		}
+		lines = append(lines, "", faint.Render("j/k choose • enter show • esc back"))
+		return box.Render(strings.Join(lines, "\n"))
 
 	case modeSubmitChoice:
 		var lines []string

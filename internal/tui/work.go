@@ -17,6 +17,12 @@ func (m *Model) handleWorkKey(msg tea.KeyMsg, row data.RowData) (tea.Cmd, bool) 
 	switch {
 	case key.Matches(msg, keys.WorkKeys.Review):
 		return m.openWorkReview(wt), true
+	case key.Matches(msg, keys.WorkKeys.Commits):
+		cmd := m.openWorkReview(wt)
+		if m.review != nil {
+			m.review.OpenCommitPicker()
+		}
+		return cmd, true
 	case key.Matches(msg, m.keys.OpenGithub):
 		return m.openBrowser(), true
 	case key.Matches(msg, keys.WorkKeys.OpenIssue):
@@ -44,6 +50,7 @@ func (m *Model) openWorkReview(wt *data.Worktree) tea.Cmd {
 			Branch:    wt.GetTitle(),
 			Base:      wt.Base,
 			MergeBase: wt.MergeBase,
+			Commits:   wt.Commits,
 		},
 	}
 	if wt.PR != nil {

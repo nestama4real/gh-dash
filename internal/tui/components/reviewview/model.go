@@ -25,6 +25,7 @@ const (
 	modeSubmitting
 	modeReply
 	modeReplying
+	modePickCommit
 )
 
 // PR identifies the pull request under review.
@@ -105,6 +106,7 @@ type Model struct {
 	replyTo  int // index of the conversation replied to, in m.threads[path]
 	input    textarea.Model
 	eventIdx int
+	pickIdx  int
 	status   string
 }
 
@@ -180,10 +182,14 @@ func (m Model) toggleUncommitted() (Model, tea.Cmd) {
 	if m.pr.Local == nil {
 		return m, nil
 	}
+	return m.setScope(!m.pr.Local.Uncommitted, "", "")
+}
+
+// setScope shows the whole branch, the uncommitted changes or one commit.
+func (m Model) setScope(uncommitted bool, commit, subject string) (Model, tea.Cmd) {
 	l := *m.pr.Local
-	l.Uncommitted = !l.Uncommitted
+	l.Uncommitted, l.Commit, l.Subject = uncommitted, commit, subject
 	m.pr.Local = &l
-	l.Commit, l.Subject = "", ""
 	m.loading, m.err = true, nil
 	m.files, m.tree, m.threads = nil, nil, nil
 	m.fileIdx, m.offset = 0, 0
@@ -382,6 +388,8 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, nil
 		case modeReply:
 			return m.updateReply(msg)
+		case modePickCommit:
+			return m.updatePickCommit(msg)
 		}
 		return m.updateNormal(msg)
 	}
@@ -488,6 +496,8 @@ func (m Model) updateNormal(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.deletePendingAtCursor()
 	case "u":
 		return m.toggleUncommitted()
+	case "C":
+		m.OpenCommitPicker()
 	case "S", "s":
 		if reason := m.cannotSubmit(); reason != "" {
 			m.status = reason
@@ -527,6 +537,9 @@ func (m Model) startExpand(n int) (Model, tea.Cmd) {
 	}
 	if l := m.pr.Local; l != nil {
 		lines, err := data.LocalFileLines(l.Dir, f.Filename)
+		if l.Commit != "" {
+			lines, err = data.CommitFileLines(l.Dir, l.Commit, f.Filename)
+		}
 		f.content, f.contentErr = lines, err
 		if err != nil {
 			m.status = "Could not read the file: " + err.Error()
@@ -907,6 +920,69 @@ func (m Model) submit() (Model, tea.Cmd) {
 	return m, func() tea.Msg {
 		return submittedMsg{err: data.SubmitPRReview(prId, name, body, comments)}
 	}
+}
+
+// scopeChoice is an entry of the commit picker.
+type scopeChoice struct {
+	label, hint     string
+	uncommitted     bool
+	commit, subject string
+}
+
+func (m *Model) scopeChoices() []scopeChoice {
+	l := m.pr.Local
+	choices := []scopeChoice{
+		{label: "All changes", hint: "the whole branch since " + l.Base + ", uncommitted changes included"},
+		{label: "Uncommitted changes", hint: "since the last commit", uncommitted: true},
+	}
+	for _, c := range l.Commits {
+		choices = append(choices, scopeChoice{label: c.Sha + " " + c.Subject, hint: "commit", commit: c.Sha, subject: c.Subject})
+	}
+	return choices
+}
+
+func (m *Model) currentScope() int {
+	l := m.pr.Local
+	for i, c := range m.scopeChoices() {
+		if c.commit == l.Commit && (l.Commit != "" || c.uncommitted == l.Uncommitted) {
+			return i
+		}
+	}
+	return 0
+}
+
+// OpenCommitPicker shows the list of diffs a worktree can be reviewed by.
+func (m *Model) OpenCommitPicker() {
+	if m.pr.Local == nil {
+		return
+	}
+	m.pickIdx = m.currentScope()
+	m.mode = modePickCommit
+	m.status = ""
+}
+
+func (m Model) updatePickCommit(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	n := len(m.scopeChoices())
+	switch msg.String() {
+	case "esc", "q", "C":
+		m.mode = modeNormal
+	case "j", "down", "tab":
+		m.pickIdx = (m.pickIdx + 1) % n
+	case "k", "up", "shift+tab":
+		m.pickIdx = (m.pickIdx - 1 + n) % n
+	case "g", "home":
+		m.pickIdx = 0
+	case "G", "end":
+		m.pickIdx = n - 1
+	case "enter":
+		m.mode = modeNormal
+		c := m.scopeChoices()[m.pickIdx]
+		if m.pickIdx == m.currentScope() {
+			return m, nil
+		}
+		return m.setScope(c.uncommitted, c.commit, c.subject)
+	}
+	return m, nil
 }
 
 // cannotSubmit explains why a worktree review cannot be sent to GitHub:

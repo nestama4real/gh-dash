@@ -7,6 +7,7 @@ import (
 // WorkKeyMap holds the keys of the "Current Work" view (git worktrees).
 type WorkKeyMap struct {
 	Review    key.Binding
+	Commits   key.Binding
 	OpenIssue key.Binding
 }
 
@@ -14,6 +15,10 @@ var WorkKeys = WorkKeyMap{
 	Review: key.NewBinding(
 		key.WithKeys("d"),
 		key.WithHelp("d", "review the changes"),
+	),
+	Commits: key.NewBinding(
+		key.WithKeys("C"),
+		key.WithHelp("C", "review a commit"),
 	),
 	OpenIssue: key.NewBinding(
 		key.WithKeys("I"),
@@ -24,6 +29,7 @@ var WorkKeys = WorkKeyMap{
 func WorkFullHelp() []key.Binding {
 	return []key.Binding{
 		WorkKeys.Review,
+		WorkKeys.Commits,
 		WorkKeys.OpenIssue,
 	}
 }
